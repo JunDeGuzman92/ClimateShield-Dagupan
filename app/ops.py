@@ -23,6 +23,29 @@ RESOURCE_TYPES = ["🚤 Rubber boat", "🛶 Banca", "🚚 Truck", "🚑 Ambulanc
 RESOURCE_STATUS = ["available", "assigned", "en route", "on scene", "returning", "maintenance"]
 
 
+def merge_edits(ed_state, base, fresh, id_col):
+    """Apply ONLY the cells a user changed in a Streamlit data_editor onto the latest data on disk.
+
+    ed_state: the editor's session state {edited_rows, added_rows, deleted_rows};
+    base: the DataFrame that was displayed (row positions); fresh: a fresh reload from disk.
+    Prevents a stale table from overwriting changes made meanwhile (e.g. an exercise event marking a shelter UNSAFE).
+    """
+    out = fresh.copy().astype(object)
+    for ri, changes in (ed_state.get("edited_rows") or {}).items():
+        rid = base.iloc[int(ri)][id_col]
+        m = out[id_col].astype(str) == str(rid)
+        for col, val in changes.items():
+            if col in out.columns:
+                out.loc[m, col] = val
+    gone = [str(base.iloc[int(ri)][id_col]) for ri in (ed_state.get("deleted_rows") or [])]
+    if gone:
+        out = out[~out[id_col].astype(str).isin(gone)]
+    added = [r for r in (ed_state.get("added_rows") or []) if any(str(v).strip() for v in r.values())]
+    if added:
+        out = pd.concat([out, pd.DataFrame(added)], ignore_index=True)
+    return out.reset_index(drop=True)
+
+
 def _now():
     return datetime.now().isoformat(timespec="minutes")
 

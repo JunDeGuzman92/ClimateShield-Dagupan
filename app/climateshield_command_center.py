@@ -1607,9 +1607,8 @@ def _score_card(sc):
 @st.fragment(run_every=5)
 def _fragment_exercise():
     state, fired = exercise.tick(L)
-    if fired:
-        st.session_state["_resp_toast"] = "⚠ " + " · ".join(e["title"] for e in fired)
-        st.rerun(scope="app")
+    for e in fired:
+        st.toast(f"⚠ Storm hour {e['h']:.0f}: {e['title']}")
     with st.container(border=True):
         if not state.get("running"):
             st.markdown("#### 🎯 Timed exercise")
@@ -1648,6 +1647,9 @@ def _fragment_exercise():
         with t3:
             st.markdown(f"**{state['team']} · {story['title']}**  \n{exercise.caption_at(story, h)}")
             st.progress(min(h / 40.0, 1.0))
+        if t4.button("↻ Update tables", use_container_width=True, key="ex_refresh",
+                     help="Events update this panel live; the tabs below refresh when you act or press this."):
+            st.rerun(scope="app")
         if t4.button("⏹ Stop & score", type="primary", use_container_width=True, key="ex_stop"):
             exercise.stop(L)
             st.rerun(scope="app")
@@ -1668,6 +1670,11 @@ def _fragment_exercise():
         if h >= 40:
             exercise.stop(L)
             st.rerun(scope="app")
+
+
+def _merge_edits(key, base, fresh, id_col):
+    """Save only the cells the user changed (see ops.merge_edits) — never overwrite event changes."""
+    return ops.merge_edits(st.session_state.get(key) or {}, base, fresh, id_col)
 
 
 @st.fragment
@@ -1760,8 +1767,9 @@ def _fragment_response():
                                "assigned_at": st.column_config.TextColumn(disabled=True),
                                "resolved_at": st.column_config.TextColumn(disabled=True)})
             if st.button("💾 Save queue changes", key="save_q"):
-                before = reqs.set_index("id")["status"]
-                ed = rsp.stamp_status_changes(ed, reqs)
+                latest = rsp.load_requests()
+                before = latest.set_index("id")["status"]
+                ed = rsp.stamp_status_changes(_merge_edits("req_editor", reqs, latest, "id"), latest)
                 rsp.save_requests(ed)
                 for _, r in ed.iterrows():
                     if r["status"] == "resolved" and before.get(r["id"]) != "resolved":
@@ -1924,9 +1932,7 @@ def _fragment_response():
                                             "lat": None, "lon": None, "updated_at": st.column_config.TextColumn(disabled=True),
                                             "elev_m": st.column_config.NumberColumn("ground m", disabled=True, format="%.1f")})
         if st.button("💾 Save shelter board", key="save_sh"):
-            full = sh.set_index("shelter_id")
-            upd = sed.set_index("shelter_id")
-            full.update(upd)
+            full = _merge_edits("sh_ed", view, ops.load_shelters(L), "shelter_id").set_index("shelter_id")
             capn = pd.to_numeric(full["capacity"], errors="coerce")
             hcn = pd.to_numeric(full["headcount"], errors="coerce").fillna(0)
             full.loc[(capn > 0) & (hcn >= capn) & (full["status"] == "open"), "status"] = "full"
@@ -1966,10 +1972,13 @@ def _fragment_response():
                                             "location": st.column_config.SelectboxColumn("location", options=sorted(L.brgy["barangay"].tolist())),
                                             "updated_at": st.column_config.TextColumn(disabled=True)})
         if st.button("💾 Save resources", key="save_res"):
-            red = red.copy()
+            red = _merge_edits("res_ed", rs, ops.load_resources(), "unit_id").fillna("")
+            nums = [int(x[1:]) for x in red["unit_id"].astype(str) if x[:1] == "U" and x[1:].isdigit()]
+            nxt = max(nums, default=0) + 1
             for i in red.index:
                 if not str(red.at[i, "unit_id"]).strip():
-                    red.at[i, "unit_id"] = f"U{len(red) + i + 1:03d}"
+                    red.at[i, "unit_id"] = f"U{nxt:03d}"
+                    nxt += 1
                 if not str(red.at[i, "status"]).strip():
                     red.at[i, "status"] = "available"
             red["updated_at"] = datetime.now().isoformat(timespec="minutes")
