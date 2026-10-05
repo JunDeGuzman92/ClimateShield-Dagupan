@@ -1,0 +1,23 @@
+[
+ {
+  "file": "slide_real.jpg",
+  "kind": "PHOTO",
+  "caption": "Typhoon Egay floods, Dagupan City (July 2023)",
+  "credit": "Photo: Lady01v \u00b7 CC BY-SA 4.0 \u00b7 via Wikimedia Commons",
+  "kb": 76
+ },
+ {
+  "file": "render_calamity_map_slide.jpg",
+  "kind": "VISUALIZATION",
+  "caption": "MODEL RENDER - Calamity-class flood on Dagupan terrain (tide +0.20 m)",
+  "credit": "ClimateShield model output (Copernicus GLO-30 + OSM)",
+  "kb": 67
+ },
+ {
+  "file": "render_3d_slide.jpg",
+  "kind": "VISUALIZATION",
+  "caption": "MODEL RENDER - Dagupan terrain in 3D with flood plane",
+  "credit": "ClimateShield model output (Copernicus GLO-30 + OSM)",
+  "kb": 34
+ }
+]

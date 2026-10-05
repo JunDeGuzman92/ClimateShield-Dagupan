@@ -1,0 +1,162 @@
+"""Operations boards: shelter capacity, response resources, drill generator.
+
+Shelters are seeded from OpenStreetMap (shelters, community centres, schools inside Dagupan's land area).
+Capacities start BLANK — they must come from the CDRRMO evacuation-centre list, never guessed.
+"""
+import random
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+LAY = Path(__file__).resolve().parents[1] / "data" / "app_layers"
+SHELTERS = LAY / "shelters.csv"
+RESOURCES = LAY / "resources.csv"
+
+SHELTER_COLS = ["shelter_id", "name", "kind", "barangay_hint", "lat", "lon", "elev_m", "capacity", "headcount",
+                "status", "contact", "updated_at"]
+SHELTER_STATUS = ["closed", "open", "full", "unsafe"]
+RESOURCE_COLS = ["unit_id", "type", "name", "owner", "status", "location", "assigned_request", "contact", "updated_at"]
+RESOURCE_TYPES = ["🚤 Rubber boat", "🛶 Banca", "🚚 Truck", "🚑 Ambulance", "🚒 Fire truck", "🚐 Van / transport",
+                  "🔦 Generator / lights", "👥 Rescue team"]
+RESOURCE_STATUS = ["available", "assigned", "en route", "on scene", "returning", "maintenance"]
+
+
+def _now():
+    return datetime.now().isoformat(timespec="minutes")
+
+
+def seed_shelters(L):
+    rows = []
+    for f in L.facilities:
+        if f["class"] not in ("shelter", "community_centre", "school", "college", "university", "townhall"):
+            continue
+        ri, ci = L.fac_cells[L.facilities.index(f)]
+        if not L.land_mask[ri, ci]:
+            continue
+        kind = {"shelter": "designated shelter", "community_centre": "community centre",
+                "townhall": "barangay/city hall"}.get(f["class"], "school")
+        rows.append(dict(name=f["name"] or f"(unnamed {f['class']})", kind=kind, lat=round(f["lat"], 6),
+                         lon=round(f["lon"], 6), elev_m=round(float(f["elev_m"]), 2)))
+    df = pd.DataFrame(rows).drop_duplicates(subset=["name", "lat", "lon"]).reset_index(drop=True)
+    # nearest barangay anchor as a hint
+    anc = [(b["barangay"], b["anchor"]) for b in L.brgy_anchors if b["anchor"]]
+    hints = []
+    for _, r in df.iterrows():
+        d = [((a["lat"] - r["lat"]) ** 2 + ((a["lon"] - r["lon"]) * 0.96) ** 2, n) for n, a in anc]
+        hints.append(min(d)[1] if d else "")
+    df["barangay_hint"] = hints
+    df["shelter_id"] = [f"S{i + 1:03d}" for i in range(len(df))]
+    df["capacity"] = ""
+    df["headcount"] = 0
+    df["status"] = "closed"
+    df["contact"] = ""
+    df["updated_at"] = _now()
+    df = df[SHELTER_COLS]
+    df.to_csv(SHELTERS, index=False)
+    return df
+
+
+def load_shelters(L):
+    if not SHELTERS.exists():
+        return seed_shelters(L)
+    df = pd.read_csv(SHELTERS, dtype={"contact": str, "capacity": str}).fillna("")
+    for c in SHELTER_COLS:
+        if c not in df:
+            df[c] = ""
+    return df[SHELTER_COLS]
+
+
+def save_shelters(df):
+    df = df.copy()
+    df["updated_at"] = _now()
+    df.to_csv(SHELTERS, index=False)
+
+
+def occupancy(df):
+    cap = pd.to_numeric(df["capacity"], errors="coerce")
+    hc = pd.to_numeric(df["headcount"], errors="coerce").fillna(0)
+    return (hc / cap).where(cap > 0)
+
+
+def shelter_with_space(L, lat, lon, W, people=1):
+    """Nearest OPEN shelter with known free space ≥ people and dry ground."""
+    df = load_shelters(L)
+    if df.empty:
+        return None
+    cap = pd.to_numeric(df["capacity"], errors="coerce")
+    hc = pd.to_numeric(df["headcount"], errors="coerce").fillna(0)
+    ok = df[(df["status"] == "open") & (cap - hc >= people) & (pd.to_numeric(df["elev_m"], errors="coerce") > W - 0.15)]
+    if ok.empty:
+        return None
+    d = (ok["lat"].astype(float) - lat) ** 2 + ((ok["lon"].astype(float) - lon) * 0.96) ** 2
+    r = ok.loc[d.idxmin()].to_dict()
+    r["free"] = int(float(r["capacity"]) - float(r["headcount"] or 0))
+    r["distance_m"] = float(np.sqrt(d.min()) * 111000)
+    return r
+
+
+def load_resources():
+    if RESOURCES.exists():
+        df = pd.read_csv(RESOURCES, dtype=str).fillna("")
+        for c in RESOURCE_COLS:
+            if c not in df:
+                df[c] = ""
+        return df[RESOURCE_COLS]
+    df = pd.DataFrame(columns=RESOURCE_COLS)
+    df.to_csv(RESOURCES, index=False)
+    return df
+
+
+def save_resources(df):
+    df = df.copy()
+    df.to_csv(RESOURCES, index=False)
+
+
+def assign_resource(unit_id, request_id):
+    df = load_resources()
+    df.loc[df["unit_id"] == unit_id, ["status", "assigned_request", "updated_at"]] = ["assigned", request_id, _now()]
+    save_resources(df)
+
+
+def release_resources_for(request_id):
+    df = load_resources()
+    m = df["assigned_request"] == request_id
+    df.loc[m, ["status", "assigned_request", "updated_at"]] = ["returning", "", _now()]
+    save_resources(df)
+
+
+# ----------------------------------------------------------------------------- reset
+def reset_simulation(L):
+    """Clear all simulated activity: requests, messages, unit assignments, shelter headcounts/status."""
+    for f in ("rescue_requests.csv", "sim_inbox.csv", "sim_outbox.csv",
+              "sms_inbox.csv", "sms_outbox.csv", "sms_contacts.csv"):
+        (LAY / f).unlink(missing_ok=True)
+    rs = load_resources()
+    if len(rs):
+        rs["status"], rs["assigned_request"], rs["updated_at"] = "available", "", _now()
+        save_resources(rs)
+    sh = load_shelters(L)
+    sh["headcount"], sh["status"] = 0, "closed"
+    save_shelters(sh)
+
+
+# ----------------------------------------------------------------------------- drill
+DRILL_LINES = [
+    ("HELP {b} {n} BOAT nasa bubong na kami", "critical"),
+    ("SAKLOLO {b} {n} gamot may matanda", "high"),
+    ("TULONG {b} {n} PAGKAIN TUBIG", "normal"),
+    ("HELP {b} {n} RESCUE baha hanggang dibdib", "critical"),
+    ("SAKLOLO {b} {n} SHELTER", "normal"),
+]
+
+
+def drill_messages(pilot_barangays, n=6, seed=None):
+    rnd = random.Random(seed)
+    out = []
+    for i in range(n):
+        tpl, _ = rnd.choice(DRILL_LINES)
+        b = rnd.choice(pilot_barangays)
+        out.append((f"Simulated resident #{rnd.randint(100, 999)}", tpl.format(b=b.upper(), n=rnd.randint(2, 12))))
+    return out
