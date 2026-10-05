@@ -369,7 +369,7 @@ PAG_CLASSES = {
     "PAGASA Advisory-level (localized flooding)": "Flood Advisory - awareness",
     "PAGASA Alert-level (widespread threat)": "Flood Alert - preparedness",
     "Calamity-class (Aug 2026-type event)": "Flood Warning - immediate action",
-    "Extreme (worst 3-day event, 755 mm)": "Severe Flooding - forced evacuation",
+    "Extreme (Oct 2009-type: 469 mm in 3 days)": "Severe Flooding - forced evacuation",
 }
 
 
@@ -2071,8 +2071,14 @@ def _fragment_methods():
             st.markdown(
                 f"""
                     - Scenario water levels are **elevation percentiles** of active land
-                      (Advisory→12% · Alert→30% · Calamity→45% · Extreme→65%), with the Calamity class calibrated against
-                      the **Aug 2026 event** (23/31 barangays flooded per CDRRMO SitRep No. 15).
+                      (Advisory→12% · Alert→30% · Calamity→45% · Extreme→65% of land flooded deeper than 15 cm), with the
+                      Calamity class calibrated against the **Aug 2026 event** (23/31 barangays flooded per CDRRMO SitRep No. 15).
+                    - **0 m plateau assumption:** GLO-30 records {100 * L.plateau_share:.0f}% of active land at exactly 0 m
+                      (fishponds, wetlands). Within that plateau, cells are ordered by the flood-susceptibility index
+                      (most susceptible floods first) and spread over 0–0.5 m, so scenario classes stay distinct.
+                      A LiDAR elevation model (Methods → upgrade) replaces this assumption where it has coverage.
+                    - *Correction (Oct 2026):* earlier versions inverted the percentile, so Advisory flooded more land than
+                      Calamity. Fixed; all scenario numbers now rise with severity.
                     - Active-land footprint ({L.meta['active_land_km2']:.1f} km² of the official 44.47 km²) avoids counting
                       Lingayen Gulf municipal waters inside the OSM city polygon.
                     - WorldPop grid rescaled so city totals match PSA census; barangay impact = census × flooded fraction

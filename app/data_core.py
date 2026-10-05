@@ -12,6 +12,8 @@ LAYERS = ROOT / "data" / "app_layers"
 PROC = ROOT / "data" / "processed"
 
 FAC_COLORS = {"school": "#4da3ff", "health": "#ff5d5d", "civic_protective": "#ffc93c", "worship": "#c39bff"}
+FLOOD_DEPTH_M = 0.15       # a cell counts as flooded when water is deeper than this
+PLATEAU_SPREAD_M = 0.5     # 0 m plateau cells are spread over 0 … this, ordered by susceptibility
 
 _alias = {
     "bonuan binloc": ["binloc"], "bonuan boquig": ["boquig"], "bonuan gueset": ["gueset"],
@@ -115,8 +117,32 @@ class Layers:
             except Exception:
                 self.dem_source = "Copernicus GLO-30 (override file unreadable — ignored)"
 
+        # ---- 0 m plateau tie-break (documented modelling assumption; see Methods page)
+        # GLO-30 flattens Dagupan's fishpond/wetland belt to exactly 0 m, so a share-of-land flood target cannot
+        # tell those cells apart. Within that plateau we order cells by the project's flood-susceptibility index
+        # (most susceptible floods first) and spread them over 0 … PLATEAU_SPREAD_M. Real elevations are untouched.
+        plateau = self.land_mask & (np.abs(self.dem) < 1e-6)
+        self.plateau_share = float(plateau.sum() / max(self.land_mask.sum(), 1))
+        if plateau.any():
+            s = np.nan_to_num(self.susc[plateau], nan=float(np.nanmedian(self.susc)))
+            order = np.argsort(np.argsort(-s, kind="stable"), kind="stable")   # 0 = most susceptible
+            dem2 = self.dem.astype("float64").copy()
+            dem2[plateau] = PLATEAU_SPREAD_M * order / max(len(order) - 1, 1)
+            self.dem = dem2.astype("float32")
+            self.elev_sorted = np.sort(self.dem[self.land_mask & np.isfinite(self.dem)])
+            self.bldg_elev = self.dem[self.bldg_cells[:, 0], self.bldg_cells[:, 1]].astype(float)
+            for f, (ri, ci) in zip(self.facilities, self.fac_cells):
+                f["elev_m"] = float(self.dem[ri, ci])
+            for b, bc in zip(self.buildings, self.bldg_cells):
+                b["elev_m"] = float(self.dem[bc[0], bc[1]])
+
     def water_level_for_share(self, share_pct):
-        return float(np.percentile(self.elev_sorted, 100 - share_pct))
+        """Water level at which `share_pct` % of active land is flooded deeper than FLOOD_DEPTH_M."""
+        return float(np.percentile(self.elev_sorted, share_pct)) + FLOOD_DEPTH_M
+
+    def flooded_share(self, W):
+        """Inverse of water_level_for_share: % of active land deeper than FLOOD_DEPTH_M at water level W."""
+        return 100.0 * float(np.searchsorted(self.elev_sorted, W - FLOOD_DEPTH_M) / len(self.elev_sorted))
 
     def depth_grid(self, W, dredge_m=0.0, drainage_m=0.0):
         W_eff = W
@@ -193,7 +219,7 @@ SCENARIOS = {
     "PAGASA Advisory-level (localized flooding)": 12,
     "PAGASA Alert-level (widespread threat)": 30,
     "Calamity-class (Aug 2026-type event)": 45,
-    "Extreme (worst 3-day event, 755 mm)": 65,
+    "Extreme (Oct 2009-type: 469 mm in 3 days)": 65,
 }
 
 
