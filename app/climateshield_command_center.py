@@ -1797,35 +1797,39 @@ def _fragment_exercise():
                        "complications are injected as it unfolds; you get a score at the end. Starting resets the "
                        "simulation (requests, messages, unit assignments, shelter headcounts) — practice capacities and "
                        "units you registered are kept.")
-            e1, e2, e3, e4 = st.columns([1.2, 1.9, 1.1, 0.9])
-            team = e1.text_input("Team name", PREFS.get("ex_team", "Team A"), key="ex_team")
-            mode = e2.radio("Storm source", ["📖 Story storms", "🌩 Real storm replays"], horizontal=True,
+            r1a, r1b, r1c = st.columns([1.3, 1.7, 3.0])
+            team = r1a.text_input("Team name", PREFS.get("ex_team", "Team A"), key="ex_team")
+            mode = r1b.radio("Storm source", ["📖 Story storms", "🌩 Real storm replays"], horizontal=True,
                              label_visibility="collapsed", key="ex_mode")
+            PREFS["pilot"] = r1c.multiselect("Practice barangay(s)", sorted(L.brgy["barangay"].tolist()),
+                                             default=PREFS.get("pilot", ["Pantal"]) or ["Pantal"], key="pilot_sel")
             if mode.startswith("📖"):
+                r2a, r2b, r2c = st.columns([3.2, 1.6, 1.0])
                 keys = list(cinema.FLOOD_STORIES.keys())
-                sk = e2.selectbox("Story storm", keys, format_func=lambda k: cinema.FLOOD_STORIES[k]["title"], key="ex_story")
+                sk = r2a.selectbox("Story storm", keys, format_func=lambda k: cinema.FLOOD_STORIES[k]["title"], key="ex_story")
                 story = cinema.FLOOD_STORIES[sk]
-                speed_opts = [1, 2, 4, 8]
-                sdef = 4
+                speed_opts, sdef = [1, 2, 4, 8], 4
                 shelp = "4 → the 40-hour story storm takes 10 minutes"
+                speed_w, start_w = r2b, r2c
             else:
+                r2a, r2b, r2c, r2d = st.columns([1.9, 1.4, 1.2, 1.0])
                 ev_keys = list(replay.EVENTS.keys())
-                evk = e2.selectbox("Historical event", ev_keys, format_func=lambda k: replay.EVENTS[k]["label"], key="ex_event")
+                evk = r2a.selectbox("Historical event", ev_keys, format_func=lambda k: replay.EVENTS[k]["label"], key="ex_event")
                 rkeys = list(replay.READINESS.keys())
-                rk = e2.selectbox("City readiness", rkeys, format_func=lambda k: replay.READINESS[k]["label"],
-                                  key="ex_readiness", help=replay.READINESS[list(replay.READINESS.keys())[0]]["note"])
+                rk = r2b.selectbox("City readiness", rkeys, format_func=lambda k: replay.READINESS[k]["label"],
+                                   key="ex_readiness", help=replay.READINESS["as_happened"]["note"])
                 story = replay.build_story(L, evk, rk)
-                speed_opts = [12, 24, 48, 96]
-                sdef = 48
+                speed_opts, sdef = [12, 24, 48, 96], 48
                 shelp = "48 → a month-long replay runs in ~18 minutes. Replay = real 1981–2026 daily rainfall driving the proxy model."
-            speed_label = f"{int(speed_opts[0])}–{int(speed_opts[-1])}"
-            speed = e3.select_slider("Storm-hours per real minute", speed_opts, value=sdef, key="ex_speed", help=shelp)
-            e4.write("")
-            if e4.button("▶ Start", type="primary", use_container_width=True, key="ex_start"):
+                speed_w, start_w = r2c, r2d
+            speed = speed_w.select_slider(
+                "Storm-hours per real minute", speed_opts, value=sdef, key="ex_speed", help=shelp)
+            if start_w.button("▶ Start", type="primary", use_container_width=True, key="ex_start"):
                 PREFS["ex_team"] = team
                 save_prefs(PREFS)
                 exercise.start(L, story, speed, PREFS.get("pilot") or ["Pantal"], team)
                 st.rerun(scope="app")
+            save_prefs(PREFS)
             if mode.startswith("🌩"):
                 st.caption(f"**{story['title']}** — {story['note']}")
                 dr = story["daily_rain"]
@@ -1905,19 +1909,17 @@ def _fragment_response():
     st.markdown('<div class="cs-warn"><b>SIMULATOR</b> — practice environment only. No messages are sent and no '
                 'agency is contacted; every "text" here is simulated and logged on this computer.</div>',
                 unsafe_allow_html=True)
-    sc1, sc2, sc3 = st.columns([2, 1.2, 1])
-    PREFS["pilot"] = sc1.multiselect("Practice barangay(s)", sorted(L.brgy["barangay"].tolist()),
-                                     default=PREFS.get("pilot", ["Pantal"]) or ["Pantal"], key="pilot_sel")
-    if sc2.button("🎲 Simulate 6 incoming help texts", use_container_width=True):
+    sc1, sc2 = st.columns([1.4, 1])
+    if sc1.button("🎲 Simulate 6 incoming help texts", use_container_width=True):
         for snd, body in ops.drill_messages(PREFS["pilot"] or ["Pantal"], 6):
             sms.simulate_inbound(snd, body)
         st.toast("6 simulated texts are in the 📱 Messages inbox")
-    if sc3.button("🧹 Reset simulation", use_container_width=True,
-                  help="Clears requests, messages, unit assignments and shelter headcounts."):
+    if sc2.button("🧹 Reset simulation", use_container_width=True,
+                  help="Clears requests, messages, unit assignments and shelter headcounts. Practice barangays are set "
+                       "in the exercise panel above."):
         ops.reset_simulation(L)
         st.toast("Simulation reset")
         st.rerun()
-    save_prefs(PREFS)
 
     ex_state = exercise.load()
     if ex_state.get("running"):
@@ -2065,26 +2067,27 @@ def _fragment_response():
                         st.caption("No eligible unit at this water level — send a boat, or wait for the water to drop.")
                 else:
                     st.caption("No units marked available — register boats/trucks in 🚤 Resources.")
-                miss = (ex_state.get("missions") or {})
-                if miss:
-                    with st.expander(f"🚤 {len(miss)} unit(s) on mission", expanded=True):
-                        rows = []
-                        for uid, m in miss.items():
-                            eta = {"out": m["eta_out"], "back": m.get("eta_back"), "home": m.get("eta_home")}.get(m["phase"], 0)
-                            doing = {"out": "en route to scene", "back": "carrying to safety",
-                                     "home": "returning to base"}[m["phase"]]
-                            deliv = f" · {m['delivered']}/{m['people']} delivered" if m.get("cap") else ""
-                            rows.append(f"**{m['unit_name']}** → {m['req']} · {doing} · ETA h{eta:.1f}"
-                                        f" · {m['km']} km{deliv}")
-                        st.markdown("  \n".join(rows))
-                        st.caption("Units travel on the storm clock; each trip carries the unit's capacity. "
-                                   "Requests auto-resolve when everyone is delivered.")
                 st.markdown("**Simulate dispatch message**")
                 orgs = rsp.load_directory()["organisation"].tolist()
                 to = st.selectbox("To (simulated)", orgs, key="disp_to")
                 if st.button("📤 Simulate send", key="disp_send", use_container_width=True):
                     sms.simulate_send(to, msg, purpose=f"dispatch:{pick}")
                     st.toast("Logged as simulated — nothing was sent")
+
+            miss = (ex_state.get("missions") or {})
+            if miss:
+                with st.expander(f"🚤 {len(miss)} unit(s) on mission", expanded=True):
+                    rows = []
+                    for uid, m in miss.items():
+                        eta = {"out": m["eta_out"], "back": m.get("eta_back"), "home": m.get("eta_home")}.get(m["phase"], 0)
+                        doing = {"out": "en route to scene", "back": "carrying to safety",
+                                 "home": "returning to base"}[m["phase"]]
+                        deliv = f" · {m['delivered']}/{m['people']} delivered" if m.get("cap") else ""
+                        rows.append(f"**{m['unit_name']}** → {m['req']} · {doing} · ETA h{eta:.1f}"
+                                    f" · {m['km']} km{deliv}")
+                    st.markdown("  \n".join(rows))
+                    st.caption("Units travel on the storm clock; each trip carries the unit's capacity. "
+                               "Requests auto-resolve when everyone is delivered.")
 
             try:
                 import folium
@@ -2207,10 +2210,11 @@ def _fragment_response():
         show_only = st.checkbox("Show open / full only", value=False, key="sh_only")
         view = sh[sh["status"].isin(["open", "full"])] if show_only else sh
         with st.expander("⚡ Quick practice opener"):
-            cc0, cc1, cc2 = st.columns([1.3, 0.7, 1])
+            cc0, cc1, cc2, cc3 = st.columns([1.3, 0.7, 0.8, 1.1])
             qp_b = cc0.selectbox("Near barangay", sorted(L.brgy["barangay"].tolist()), index=0, key="sh_qp_b")
             n_op = cc1.number_input("Open nearest", 1, 20, 3, key="sh_qp_n")
-            if cc2.button("🎲 Open them (practice only)", use_container_width=True,
+            cap_q = cc2.number_input("capacity", 0, 5000, 120, key="sh_qp_cap")
+            if cc3.button("🎲 Open them (practice only)", use_container_width=True,
                           help="Sets status=open with a round practice capacity for the centres nearest the chosen "
                                "barangay. Real capacities come from the CDRRMO list — blank them before any "
                                "real-world use."):
@@ -2219,19 +2223,21 @@ def _fragment_response():
                 if a:
                     d = (full["lat"].astype(float) - a["lat"]) ** 2 + ((full["lon"].astype(float) - a["lon"]) * 0.96) ** 2
                     full.loc[d.nsmallest(int(n_op)).index, "status"] = "open"
-                    full.loc[d.nsmallest(int(n_op)).index, "capacity"] = "120"
+                    full.loc[d.nsmallest(int(n_op)).index, "capacity"] = str(int(cap_q))
                     ops.save_shelters(full)
-                    st.toast(f"{int(n_op)} centres opened near {qp_b} (practice capacity 120)")
+                    st.toast(f"{int(n_op)} centres opened near {qp_b} (practice capacity {int(cap_q)})")
                     st.rerun()
                 else:
                     st.caption(f"No anchor for {qp_b} — open centres by hand in the table.")
+        sh_cap_max = int(max(120, pd.to_numeric(sh["capacity"], errors="coerce").max() or 120))
         sed = st.data_editor(view, hide_index=True, use_container_width=True, key="sh_ed", height=360,
                              column_config={"status": st.column_config.SelectboxColumn("status", options=ops.SHELTER_STATUS),
                                             "shelter_id": st.column_config.TextColumn(disabled=True),
                                             "lat": None, "lon": None, "updated_at": st.column_config.TextColumn(disabled=True),
                                             "elev_m": st.column_config.NumberColumn("ground m", disabled=True, format="%.1f"),
-                                            "headcount": st.column_config.ProgressColumn("headcount", min_value=0, max_value=200,
-                                                                                          format="%f vac."),
+                                            "headcount": st.column_config.ProgressColumn("headcount", min_value=0,
+                                                                                          max_value=sh_cap_max,
+                                                                                          format="%d evac."),
                                             "capacity": st.column_config.NumberColumn("capacity", min_value=0, step=10)})
         if st.button("💾 Save shelter board", key="save_sh"):
             full = _merge_edits("sh_ed", view, ops.load_shelters(L), "shelter_id").set_index("shelter_id")

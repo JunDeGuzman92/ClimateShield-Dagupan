@@ -313,7 +313,7 @@ def make_city_map(L, depth=None, focus=None, crowd=True, fac=True,
 
     if depth is not None and legend:
         m.get_root().html.add_child(folium.Element(
-            '<div style="position:absolute;top:10px;right:10px;z-index:1000;'
+            '<div class="cs-maplegend" style="position:absolute;bottom:12px;left:12px;z-index:1000;'
             'background:rgba(255,255,255,.92);border:1px solid #e5e7eb;border-radius:10px;padding:6px 10px;'
             'font:600 11px \'Segoe UI\',sans-serif;color:#1f2937;box-shadow:0 3px 10px rgba(0,0,0,.12);">'
             'flood depth<div style="width:110px;height:8px;border-radius:4px;margin-top:4px;'
