@@ -136,6 +136,45 @@ def shelter_with_space(L, lat, lon, W, people=1):
     return r
 
 
+def admit_evacuees(L, brgy, W, people, exclude_ids=()):
+    """Delivered people go to the best shelter available near `brgy`.
+
+    Priority: nearest OPEN shelter with free space on dry ground → nearest open with space (wet site) →
+    nearest open at all (over-capacity; the score penalises it) → none (unsheltered — a real planning gap).
+    Returns an (ok, detail) note for the mission timeline. Only exercise deliveries call this.
+    """
+    df = load_shelters(L)
+    if df.empty or people <= 0:
+        return False, "no shelter board — evacuees wait at the drop-off"
+    a = None
+    for b in L.brgy_anchors:
+        if b["barangay"] == brgy and b["anchor"]:
+            a = b["anchor"]
+    lat, lon = (a["lat"], a["lon"]) if a else (16.04, 120.33)
+    cap = pd.to_numeric(df["capacity"], errors="coerce")
+    hc = pd.to_numeric(df["headcount"], errors="coerce").fillna(0)
+    dry = pd.to_numeric(df["elev_m"], errors="coerce") > (W - 0.15)
+    openm = (df["status"] == "open") & (~df["shelter_id"].isin(exclude_ids))
+    d2 = (df["lat"].astype(float) - lat) ** 2 + ((df["lon"].astype(float) - lon) * 0.96) ** 2
+    for cand, why in (
+        (df[openm & (cap - hc >= people) & dry], "space + dry"),
+        (df[openm & (cap - hc >= people)], "space (wet site)"),
+        (df[openm], "over capacity"),
+    ):
+        if len(cand):
+            i = d2[cand.index].idxmin()
+            new_hc = int(hc.loc[i] + people)
+            df.loc[i, "headcount"] = new_hc
+            cap_i = pd.to_numeric(pd.Series([df.loc[i, "capacity"]]), errors="coerce").iloc[0]
+            if pd.notna(cap_i) and new_hc >= float(cap_i) and df.loc[i, "status"] == "open":
+                df.loc[i, "status"] = "full"
+                save_shelters(df)
+                return True, f"→ {df.loc[i, 'name']} is now FULL ({new_hc}/{int(cap_i)})"
+            save_shelters(df)
+            return True, f"→ {df.loc[i, 'name']} ({why})"
+    return False, "no OPEN shelter — add one on the 🏠 Shelters board"
+
+
 def load_resources():
     if RESOURCES.exists():
         df = pd.read_csv(RESOURCES, dtype=str).fillna("")

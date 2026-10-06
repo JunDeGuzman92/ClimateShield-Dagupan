@@ -242,7 +242,7 @@ ESRI_GRAY = ("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_
 
 
 def make_city_map(L, depth=None, focus=None, crowd=True, fac=True,
-                  center=(16.0432, 120.3342), zoom=13, W_cut=None, vmax=None):
+                  center=(16.0432, 120.3342), zoom=13, W_cut=None, vmax=None, legend=True):
     import folium
     m = folium.Map(location=center, zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=ESRI_GRAY[0], attr=ESRI_GRAY[1], name="map (Esri light)").add_to(m)
@@ -311,6 +311,15 @@ def make_city_map(L, depth=None, focus=None, crowd=True, fac=True,
         folium.map.Marker([focus["lat"], focus["lon"]]).add_child(
             folium.ToolTip(focus["name"], permanent=True)).add_to(m)
 
+    if depth is not None and legend:
+        m.get_root().html.add_child(folium.Element(
+            '<div style="position:absolute;top:10px;right:10px;z-index:1000;'
+            'background:rgba(255,255,255,.92);border:1px solid #e5e7eb;border-radius:10px;padding:6px 10px;'
+            'font:600 11px \'Segoe UI\',sans-serif;color:#1f2937;box-shadow:0 3px 10px rgba(0,0,0,.12);">'
+            'flood depth<div style="width:110px;height:8px;border-radius:4px;margin-top:4px;'
+            'background:linear-gradient(90deg,#ffffd9,#c7e9b4,#41b6c4,#081d58);"></div>'
+            '<div style="display:flex;justify-content:space-between;font-size:9px;color:#6b7280;">'
+            '<span>shallow</span><span>deep</span></div></div>'))
     folium.LayerControl(collapsed=False).add_to(m)
     return m
 
@@ -725,6 +734,22 @@ THEMES = {
     },
 }
 THEME_LABELS = {"day": "☀️ Day ops", "night": "🌙 Night ops"}
+
+
+def terrain_profile(L, lon, lat, half_deg=0.012, n=101):
+    """Ground elevation along an east–west line through (lon, lat).
+
+    Returns (metres from the core west→east, elevation m). 0.012° ≈ ±1.3 km — enough to show the bowl a
+    barangay sits in without leaving the grid. Used by the Walkthrough Terrain tab.
+    """
+    lons = np.linspace(lon - half_deg, lon + half_deg, n)
+    lats = np.full(n, float(lat))
+    xs, ys = L.to_utm(lons, lats)
+    cis = np.clip(np.round((xs - L.transform.c) / 30 - 0.5), 0, L.w - 1).astype(int)
+    ris = np.clip(np.round((L.transform.f - ys) / 30 - 0.5), 0, L.h - 1).astype(int)
+    z = np.nan_to_num(L.dem[ris, cis], nan=0.0)
+    dists = np.linspace(-half_deg * 111000 * np.cos(np.radians(lat)), half_deg * 111000 * np.cos(np.radians(lat)), n)
+    return dists, z
 
 
 def resolve_bg_photo():

@@ -180,6 +180,17 @@ def get_layers():
     return dc.Layers()
 
 
+def _urlopen_tls(req, timeout=12):
+    """urlopen with certifi's CA bundle when available (met.no's chain needs it on some Python installs)."""
+    import urllib.request
+    try:
+        import certifi
+        import ssl
+        return urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context(cafile=certifi.where()))
+    except Exception:
+        return urllib.request.urlopen(req, timeout=timeout)
+
+
 @st.cache_data(ttl=120, show_spinner=False)
 def get_live():
     data = None
@@ -194,7 +205,7 @@ def get_live():
             req = urllib.request.Request(
                 "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=16.0432&lon=120.3342",
                 headers={"User-Agent": "ClimateShieldDagupan/1.0 community disaster-awareness project"})
-            with urllib.request.urlopen(req, timeout=12) as r:
+            with _urlopen_tls(req) as r:
                 d = json.loads(r.read().decode("utf-8"))
             series = d["properties"]["timeseries"]
             inst = series[0]["data"]["instant"]["details"]
@@ -1251,27 +1262,28 @@ def _fragment_lab():
 
     # ================================================================= TELEMETRY
 
-@st.fragment
+@st.fragment(run_every=90)
 def _fragment_tel():
     st.button("Back to Command Deck", on_click=_nav_to, args=(NAV[0],))
     st.title(f"📡 {tt('Live Telemetry')}")
-    st.caption("Real conditions, official thresholds. Crowd reports keep the map human between gauges.")
+    st.caption("Real conditions, official thresholds. This page refreshes itself every ~90 seconds; "
+               "the feed renews at most every 2 minutes. Crowd reports keep the map human between gauges.")
 
     live, ok = get_live()
     cur = (live or {}).get("current", {})
     if not cur:
-        st.error("Live feed unreachable and no cache available — historical context only.")
+        st.error("Live feed unreachable and no cache available — historical context only. "
+                 "Check the internet connection or press Refresh; the badge below shows the last successful fetch.")
     else:
         rcol, _ = st.columns([1, 2])
         with rcol:
-            if st.button("🔄 Refresh live data"):
+            if st.button("🔄 Refresh live data now"):
                 st.cache_data.clear()
                 st.rerun()
+        st.markdown(f'<div class="cs-banner">{freshness_badge(cur, ok)}</div>', unsafe_allow_html=True)
         HI = dc.hi_c(cur["temperature_2m"], cur["relative_humidity_2m"])
         cat, col, _ = dc.hi_category(HI)
         catcolor = "#2e6da4" if cat in ("No Caution", "Caution") else "#b34700"
-        st.markdown(f'<div class="cs-banner">{freshness_badge(cur, ok)} · auto-refresh every 2 min</div>',
-                    unsafe_allow_html=True)
         g1, g2 = st.columns([1, 2.1])
         with g1:
             gauge = go.Figure(go.Indicator(
@@ -1291,57 +1303,48 @@ def _fragment_tel():
                                 paper_bgcolor=BEIGE_BG)
             st.plotly_chart(gauge, use_container_width=True)
             st.caption(f"Observed at 16.04°N 120.33°E via {cur.get('source', '—')} "
-                       f"({cur['temperature_2m']:.1f}°C, RH {cur['relative_humidity_2m']:.0f}%). "
+                       f"({cur['temperature_2m']:.1f}°C, RH {cur['relative_humidity_2m']:.0f}%, "
+                       f"obs {cur.get('observed_at', '—')}). "
                        "Station-observed PAGASA heat index may read higher.")
         with g2:
-            hourly = live["hourly"]
-            hf = pd.DataFrame({"time": pd.to_datetime(hourly["time"]),
-                               "rain": hourly["precipitation"],
-                               "prob": hourly["precipitation_probability"]})
-            hf["day"] = hf["time"].dt.date
-            daily_rain = hf.groupby("day")["rain"].sum()
-            figr = go.Figure()
-            figr.add_bar(x=[str(d) for d in daily_rain.index], y=daily_rain.values,
-                         name="forecast rain", marker_color="#4aa3d8")
-            figr.add_hline(y=50, line_color="#e67e22", annotation_text="50 mm heavy-advisory")
-            figr.add_hline(y=100, line_color="#c0392b", annotation_text="100 mm intense-danger")
-            st.plotly_chart(plotly_beige(figr, height=300, y_title="mm/day"), use_container_width=True)
-            hit50 = daily_rain[daily_rain >= 50]
-            if len(hit50):
-                banner(f"<b>Rain trigger watch:</b> {len(hit50)} forecast day(s) cross the 50 mm heavy-advisory line — "
-                       f"first on <b>{hit50.index[0]}</b> ({hit50.iloc[0]:.0f} mm). Playbook: pre-position banca rosters, "
-                       "clear drains tonight.", "warn")
+            hourly = live.get("hourly") or {}
+            if hourly:
+                hf = pd.DataFrame({"time": pd.to_datetime(hourly["time"]), "rain": hourly["precipitation"]})
+                now = pd.Timestamp.now().floor("h")
+                hf["kind"] = np.where(hf["time"] <= now, "observed / analysed", "forecast")
+                figp = go.Figure()
+                for kind, colr in [("observed / analysed", "#2563eb"), ("forecast", "#93c5fd")]:
+                    sub = hf[hf["kind"] == kind]
+                    figp.add_bar(x=sub["time"], y=sub["rain"], name=kind, marker_color=colr)
+                figp.add_vline(x=now, line_color="#ef4444", line_dash="dash",
+                               annotation_text="now", annotation_position="top")
+                figp.add_hline(y=7.5, line_color="#f59e0b", line_dash="dot", annotation_text="7.5 mm/h heavy")
+                figp.add_hline(y=15, line_color="#dc2626", line_dash="dot", annotation_text="15 mm/h intense")
+                figp.update_layout(barmode="overlay", legend=dict(orientation="h", y=1.1))
+                st.plotly_chart(plotly_beige(figp, height=285, y_title="mm per hour"), use_container_width=True,
+                                config={"displayModeBar": False})
+                last24 = float(hf[(hf["time"] > now - pd.Timedelta(hours=24)) & (hf["time"] <= now)]["rain"].sum())
+                next24 = float(hf[(hf["time"] > now) & (hf["time"] <= now + pd.Timedelta(hours=24))]["rain"].sum())
+                peak = float(hf[hf["kind"] == "forecast"]["rain"].max() or 0)
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Rain · last 24 h", f"{last24:.1f} mm", "model-analysed")
+                m2.metric("Rain · next 24 h", f"{next24:.1f} mm", "forecast", delta_color="inverse")
+                m3.metric("Peak rate ahead", f"{peak:.1f} mm/h", "PAGASA heavy ≥ 7.5 · intense ≥ 15",
+                          delta_color="inverse")
+                if next24 >= 50:
+                    banner(f"<b>Rain trigger watch:</b> {next24:.0f} mm expected in the next 24 h — crosses the "
+                           "50 mm heavy-advisory line. Playbook: pre-position banca rosters, clear drains tonight.", "warn")
+                elif peak >= 7.5:
+                    banner(f"<b>Rain trigger watch:</b> peak hourly rate {peak:.1f} mm/h reaches heavy-advisory "
+                           "intensity — watch PAGASA advisories tonight.", "warn")
+                else:
+                    banner("<b>Rain trigger watch:</b> no heavy-advisory-level rain forecast in the next 24 h — "
+                           "good window for drainage maintenance and drills.", "info")
+                st.caption("Hourly totals from Open-Meteo (ECMWF/GFS blend), observed + 7-day forecast. Not a radar: "
+                            "for live radar use PAGASA's official site. Official rainfall warnings: PAGASA Heavy "
+                            "Rainfall Warning System.")
             else:
-                banner("<b>Rain trigger watch:</b> no heavy-advisory-level rain forecast in the next 7 days — "
-                       "good window for drainage maintenance and drills.", "info")
-
-    st.subheader("🌧 Rain — last 24 h observed and next 7 days (Open-Meteo)")
-    if live and live.get("hourly"):
-        hourly = live["hourly"]
-        hf = pd.DataFrame({"time": pd.to_datetime(hourly["time"]), "rain": hourly["precipitation"]})
-        now = pd.Timestamp.now().floor("h")
-        hf["kind"] = np.where(hf["time"] <= now, "observed / analysed", "forecast")
-        figp = go.Figure()
-        for kind, col in [("observed / analysed", "#2563eb"), ("forecast", "#93c5fd")]:
-            sub = hf[hf["kind"] == kind]
-            figp.add_bar(x=sub["time"], y=sub["rain"], name=kind, marker_color=col)
-        figp.add_vline(x=now, line_color="#ef4444", line_dash="dash", annotation_text="now", annotation_position="top")
-        figp.add_hline(y=7.5, line_color="#f59e0b", line_dash="dot", annotation_text="7.5 mm/h heavy")
-        figp.add_hline(y=15, line_color="#dc2626", line_dash="dot", annotation_text="15 mm/h intense")
-        figp.update_layout(barmode="overlay", legend=dict(orientation="h", y=1.1))
-        st.plotly_chart(plotly_beige(figp, height=300, y_title="mm per hour"), use_container_width=True,
-                        config={"displayModeBar": False})
-        last24 = float(hf[(hf["time"] > now - pd.Timedelta(hours=24)) & (hf["time"] <= now)]["rain"].sum())
-        next24 = float(hf[(hf["time"] > now) & (hf["time"] <= now + pd.Timedelta(hours=24))]["rain"].sum())
-        r1, r2, r3 = st.columns(3)
-        r1.metric("Rain · last 24 h", f"{last24:.1f} mm", "model-analysed at 16.04°N 120.33°E")
-        r2.metric("Rain · next 24 h", f"{next24:.1f} mm", "forecast", delta_color="inverse")
-        r3.metric("Peak hourly rate ahead", f"{float(hf[hf['kind'] == 'forecast']['rain'].max() or 0):.1f} mm/h",
-                  "PAGASA heavy ≥ 7.5 · intense ≥ 15", delta_color="inverse")
-        st.caption("Hourly totals from Open-Meteo (ECMWF/GFS blend). Not a radar: for live radar use PAGASA's "
-                   "official site. Official rainfall warnings: PAGASA Heavy Rainfall Warning System.")
-    else:
-        st.info("No hourly rain data available right now.")
+                st.info("No hourly rain data available right now.")
 
     st.subheader("📟 Official sensor network — DOST-ASTI PhilSensors (Pangasinan)")
     with st.spinner("Checking PhilSensors (cached 30 min)…"):
@@ -1522,12 +1525,15 @@ def _fragment_wlk():
             st.info("This barangay has no OSM place anchor yet, so we can't center a local map. "
                     "Try Pantal, Carael, Calmay, Bonuan Gueset, Bolosan, Lucao — or ask the LGU for barangay polygons.")
         else:
+            W_c = L.water_level_for_share(45)
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Elevation at core", f"{row['elev_m']:.1f} m", "city median is 0.0 m")
             c2.metric("Nearest river/canal", f"{row['dist_river_m']:.0f} m")
             c3.metric("Susceptibility (300 m)", f"{row['mean_susc_300m']:.0f}/100",
                       "high" if row['mean_susc_300m'] >= 65 else "mid")
-            c4.metric("Buildings within 600 m", f"{int(row.get('bldg_600m', 0) or 0)}")
+            d_core = max(W_c - float(row["elev_m"]), 0.0)
+            c4.metric("Water at the core · calamity",
+                      "dry" if d_core <= 0 else f"{d_core:.2f} m", kit.depth_label(d_core), delta_color="inverse")
             plain = ("Most ground here sits at or below ~2 m — in calamity-type events expect knee-to-waist water "
                      "even before high tide."
                      if row['elev_m'] <= 2 else
@@ -1535,20 +1541,51 @@ def _fragment_wlk():
                      "and backed-up drainage instead of direct ponding.")
             st.markdown(f'<div class="cs-banner" style="font-size:13.5px;"><b>Plain reading:</b> {plain}</div>',
                         unsafe_allow_html=True)
-            W_c = L.water_level_for_share(45)
-            d_c = L.depth_grid(W_c)[0]
-            try:
-                from streamlit_folium import st_folium
-                fm = kit.make_city_map(L, depth=d_c, W_cut=W_c,
-                                       focus={"lat": anchor["lat"], "lon": anchor["lon"], "name": sel},
-                                       center=(anchor["lat"], anchor["lon"]), zoom=14)
-                st_folium(fm, height=540, use_container_width=True)
-                st.caption("Calamity-class flood overlay (tide not included) · hover schools/clinics for their "
-                           "flood state · orange star = barangay core")
-            except Exception:
-                fig = make_local_fig(anchor, sel)
-                st.pyplot(fig)
-                plt.close(fig)
+            t1, t2 = st.columns([1.45, 1])
+            with t1:
+                d_c = L.depth_grid(W_c)[0]
+                try:
+                    from streamlit_folium import st_folium
+                    fm = kit.make_city_map(L, depth=d_c, W_cut=W_c, legend=False,
+                                           focus={"lat": anchor["lat"], "lon": anchor["lon"], "name": sel},
+                                           center=(anchor["lat"], anchor["lon"]), zoom=14)
+                    st_folium(fm, height=520, use_container_width=True)
+                except Exception:
+                    fig = make_local_fig(anchor, sel)
+                    st.pyplot(fig)
+                    plt.close(fig)
+                st.markdown(
+                    '<div style="display:flex;align-items:center;gap:10px;font-size:12px;color:#1f2937;">'
+                    '<b>How to read this map:</b> star = barangay core · blue shading = flood water at '
+                    'calamity level — darker means deeper · green line = coastline · blue lines = rivers/canals · '
+                    'dots = schools (blue) & health sites (red). Hover anything.</div>'
+                    '<div style="margin-top:4px;font-size:11px;color:#6b7280;">Flood depth: '
+                    '<span style="display:inline-block;width:120px;height:8px;border-radius:4px;'
+                    'background:linear-gradient(90deg,#ffffd9,#c7e9b4,#41b6c4,#081d58);"></span> shallow → deep</div>',
+                    unsafe_allow_html=True)
+            with t2:
+                st.markdown("#### Your ground, east to west")
+                dists, z = kit.terrain_profile(L, anchor["lon"], anchor["lat"])
+                fprof = go.Figure()
+                fprof.add_scatter(x=dists, y=z, fill="tozeroy", name="ground",
+                                  line=dict(color="#8a7a5c", width=2), hovertemplate="%{x:.0f} m · ground %{y:.2f} m<extra></extra>")
+                fprof.add_scatter(x=dists, y=np.maximum(z, W_c), fill="tonexty", name="flood water (calamity)",
+                                  line=dict(color="#2563eb", width=1.5), fillcolor="rgba(37,99,235,.35)",
+                                  hovertemplate="water %{y:.2f} m<extra></extra>")
+                fprof.add_scatter(x=[0], y=[float(row["elev_m"])],
+                                  mode="markers", name="core", marker=dict(size=12, color="#f59e0b", symbol="star"),
+                                  hovertemplate="your core<extra></extra>")
+                fprof.update_layout(height=300, margin=dict(l=8, r=8, t=30, b=8),
+                                    xaxis=dict(title="metres east (−) of the core (+)", gridcolor=PLOT_GRID),
+                                    yaxis=dict(title="m above sea", gridcolor=PLOT_GRID),
+                                    legend=dict(orientation="h", y=1.22, font=dict(size=10)))
+                st.plotly_chart(plotly_beige(fprof, height=300, title="Ground profile · 2.6 km through the core"),
+                                use_container_width=True, config={"displayModeBar": False})
+                st.markdown(mapfilm.depth_gauge_html(d_core, kit.depth_label(d_core) + " at the core"),
+                            unsafe_allow_html=True)
+                st.caption("The blue wedge between the ground line and the water line is how deep a calamity flood "
+                           "sits on each street — the wider the wedge over the star, the more of the barangay goes "
+                           "under. Tide is not included here; it adds on top.")
     elif step == 2:
         res = []
         for name, share_e in dc.SCENARIOS.items():
@@ -1600,7 +1637,8 @@ def _fragment_wlk():
             est = e["barangay_impact"].set_index("barangay").loc[sel, "affected_est"]
         live, ok = get_live()
         cur = (live or {}).get("current", {})
-        if cur and dc.hi_c(cur["temperature_2m"], cur["relative_humidity_2m"]) >= 42:
+        heat_now = bool(cur and dc.hi_c(cur["temperature_2m"], cur["relative_humidity_2m"]) >= 42)
+        if heat_now:
             HI = dc.hi_c(cur["temperature_2m"], cur["relative_humidity_2m"])
             card = kit.action_card_heat(row, HI, dc.hi_category(HI)[0], lang=PREFS.get("lang", "English"))
             st.subheader("🔥 Heat action card (live trigger)")
@@ -1608,6 +1646,25 @@ def _fragment_wlk():
             card = kit.action_card_flood(row, W_c, est, "Calamity-class preparedness",
                                           lang=PREFS.get("lang", "English"))
             st.subheader("🌊 Flood action card (Calamity-class preparedness)")
+        gcol, mcol = st.columns([1, 2])
+        with gcol:
+            d_core = 0.0 if heat_now else max(W_c - float(row["elev_m"]), 0.0)
+            st.markdown(mapfilm.depth_gauge_html(d_core, kit.depth_label(d_core) + " at the core"),
+                        unsafe_allow_html=True)
+        with mcol:
+            m1, m2 = st.columns(2)
+            m1.metric("Est. residents in flood zones", f"{est:,}" if est is not None else "—",
+                      f"of {int(row['popn']):,} census (calamity + tide)")
+            if heat_now:
+                m2.metric("Heat index NOW", f"{dc.hi_c(cur['temperature_2m'], cur['relative_humidity_2m']):.0f}°C",
+                          dc.hi_category(HI)[0], delta_color="inverse")
+            elif anchor:
+                sp = ops.shelter_with_space(L, anchor["lat"], anchor["lon"], W_c, people=int(row["popn"]) // 100 or 1)
+                m2.metric("Nearest shelter with space", (sp["name"][:34] if sp else "none OPEN with space"),
+                          f"{sp['free']} free · {sp['distance_m'] / 1000:.1f} km" if sp else
+                          "open one on the 🏠 Shelters board")
+            else:
+                m2.metric("Nearest shelter with space", "—", "no spatial anchor")
         st.code(card, language=None)
         brief, bext = kit.build_briefing(row, anchor, W_c, est, "Calamity-class (Aug 2026-type event)",
                                          PREFS.get("lang", "English"),
@@ -2049,21 +2106,43 @@ def _fragment_response():
 
     with tabs[2]:
         st.markdown("**Evacuation centre board** — seeded from OpenStreetMap (schools, halls, shelters inside Dagupan). "
-                    "Capacities start blank on purpose: enter the CDRRMO's official figures.")
+                    "Capacities start blank on purpose: enter the CDRRMO's official figures. During a timed exercise, "
+                    "each successful boat delivery automatically lands evacuees here, and centres mark FULL on arrival "
+                    "when the headcount passes capacity.")
         sh = ops.load_shelters(L)
         occ = ops.occupancy(sh)
-        s1, s2, s3, s4 = st.columns(4)
+        hauling = sum(m.get("load") or 0 for m in (ex_state.get("missions") or {}).values() if m["phase"] == "back")
+        s1, s2, s3, s4, s5 = st.columns(5)
         s1.metric("Open", int((sh["status"] == "open").sum()))
         s2.metric("Full", int((sh["status"] == "full").sum()))
         s3.metric("Evacuees sheltered", f"{int(pd.to_numeric(sh['headcount'], errors='coerce').fillna(0).sum()):,}")
         s4.metric("Capacity known", f"{int(pd.to_numeric(sh['capacity'], errors='coerce').notna().sum())} / {len(sh)}")
+        s5.metric("Aboard boats now", f"{hauling}" if hauling else "0", "en route to shelters" if hauling else "no missions airborne")
         show_only = st.checkbox("Show open / full only", value=False, key="sh_only")
         view = sh[sh["status"].isin(["open", "full"])] if show_only else sh
+        with st.expander("📖 Quick practice setup", expanded=False):
+            cc1, cc2, cc3 = st.columns([1, 1, 2])
+            n_op = cc1.number_input("Open the nearest N centres to Pantal", 1, 20, 3, key="sh_qp_n")
+            cap_q = cc2.number_input("with practice capacity", 0, 5000, 120, key="sh_qp_cap")
+            if cc3.button(f"🎲 Open {n_op} centres (practice only)", use_container_width=True,
+                          help="Sets status=open and a round practice capacity for the centres nearest to Pantal. "
+                               "Real capacities come from the CDRRMO list."):
+                full = ops.load_shelters(L)
+                a = next(b["anchor"] for b in L.brgy_anchors if b["barangay"] == "Pantal")
+                d = (full["lat"].astype(float) - a["lat"]) ** 2 + ((full["lon"].astype(float) - a["lon"]) * 0.96) ** 2
+                full.loc[d.nsmallest(int(n_op)).index, "status"] = "open"
+                full.loc[d.nsmallest(int(n_op)).index, "capacity"] = str(int(cap_q))
+                ops.save_shelters(full)
+                st.toast(f"{int(n_op)} centres opened with capacity {int(cap_q)}")
+                st.rerun()
         sed = st.data_editor(view, hide_index=True, use_container_width=True, key="sh_ed", height=360,
                              column_config={"status": st.column_config.SelectboxColumn("status", options=ops.SHELTER_STATUS),
                                             "shelter_id": st.column_config.TextColumn(disabled=True),
                                             "lat": None, "lon": None, "updated_at": st.column_config.TextColumn(disabled=True),
-                                            "elev_m": st.column_config.NumberColumn("ground m", disabled=True, format="%.1f")})
+                                            "elev_m": st.column_config.NumberColumn("ground m", disabled=True, format="%.1f"),
+                                            "headcount": st.column_config.ProgressColumn("headcount", min_value=0, max_value=200,
+                                                                                          format="%f vac."),
+                                            "capacity": st.column_config.NumberColumn("capacity", min_value=0, step=10)})
         if st.button("💾 Save shelter board", key="save_sh"):
             full = _merge_edits("sh_ed", view, ops.load_shelters(L), "shelter_id").set_index("shelter_id")
             capn = pd.to_numeric(full["capacity"], errors="coerce")
@@ -2094,8 +2173,24 @@ def _fragment_response():
 
     # ================================================================ resources
     with tabs[3]:
-        st.markdown("**Response resources** — boats, trucks, ambulances, teams. Add rows for each unit.")
+        st.markdown("**Response resources** — boats, trucks, ambulances, teams. Add rows for each unit. During a "
+                    "timed exercise these units travel at the speeds below and carry the listed capacity per trip.")
         rs = ops.load_resources()
+        phy = pd.DataFrame([dict(unit_type=t, **{"speed km/h": p["speed_kmh"], "carries/trip": p["capacity"],
+                                                 "max water at request (m)": p.get("max_water_m") or "— any (boat)"})
+                            for t, p in ops.UNIT_PHYSICS.items()])
+        with st.expander("📐 Unit physics used by the simulator"):
+            st.dataframe(phy, hide_index=True, use_container_width=True)
+            st.caption("Practice values, clearly not engineering data: straight-line distance ÷ speed gives the ETA; "
+                       "vehicles refuse requests deeper than their max water; support units (carries 0) make one "
+                       "delivery round trip. Real speeds depend on debris, current and road state.")
+        ustat = ex_state.get("unit_stats") or {}
+        if ustat:
+            stat_df = pd.DataFrame([dict(unit=u, trips=s.get("trips", 0), people=s.get("people", 0))
+                                    for u, s in ustat.items()])
+            with st.expander(f"📊 This exercise so far — {int(stat_df['people'].sum())} people moved in "
+                             f"{int(stat_df['trips'].sum())} trips"):
+                st.dataframe(stat_df, hide_index=True, use_container_width=True)
         if len(rs):
             cnt = rs.groupby(["type", "status"]).size().unstack(fill_value=0)
             st.dataframe(cnt, use_container_width=True)

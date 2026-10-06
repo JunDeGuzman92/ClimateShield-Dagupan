@@ -269,7 +269,7 @@ def assign(L, state, unit_id, req_id):
     state.setdefault("missions", {})[unit_id] = dict(
         req=req_id, phase="out", start_h=h, eta_out=h + travel, km=round(km, 1), travel_h=round(travel, 2),
         cap=cap if rq["need"] in NEED_CARRIES else 0, need=rq["need"], people=int(rq["people"] or 1),
-        delivered=0, unit_name=str(un.get("name") or unit_id))
+        brgy=rq["barangay"], delivered=0, unit_name=str(un.get("name") or unit_id))
     state.setdefault("delivered", {}).setdefault(req_id, 0)
     ops.assign_resource(unit_id, req_id, status="en route")
     _stamp_request(req_id, status="assigned" if rq["status"] in ("new", "acknowledged") else rq["status"],
@@ -315,11 +315,15 @@ def _physics(L, state, h):
                 m["phase"], m["eta_back"] = "back", h + LOAD_H + m["travel_h"]
                 notes.append(f"📍 {m['unit_name']} reached {m['req']}")
         elif m["phase"] == "back" and h >= m["eta_back"]:
+            stats = state.setdefault("unit_stats", {}).setdefault(uid, dict(trips=0, people=0))
             if m["cap"] and m.get("load"):
                 delivered[m["req"]] = delivered.get(m["req"], 0) + m["load"]
                 m["delivered"] += m["load"]
+                stats["people"] = int(stats.get("people", 0)) + m["load"]
+                stats["trips"] = int(stats.get("trips", 0)) + 1
+                sh_ok, sh_note = ops.admit_evacuees(L, m["brgy"], water_at(L, state["story"], h), m["load"])
                 rem = m["people"] - delivered[m["req"]]
-                notes.append(f"🎽 {m['unit_name']} delivered {m['load']} to safety"
+                notes.append(f"🎽 {m['unit_name']} delivered {m['load']} to safety — {sh_note}"
                              + (f" — {rem} still waiting" if rem > 0 else f" — {m['req']} complete"))
                 m["load"] = 0
                 if rem <= 0:
@@ -332,6 +336,7 @@ def _physics(L, state, h):
                 else:
                     m["phase"], m["eta_out"] = "out", h + m["travel_h"]
             else:
+                stats["trips"] = int(stats.get("trips", 0)) + 1
                 _stamp_request(m["req"], status="resolved", resolved_at=rsp._now(), updated_at=rsp._now())
                 ops.assign_resource(uid, "", status="returning")
                 m["phase"], m["eta_home"] = "home", h + m["travel_h"]

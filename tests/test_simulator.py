@@ -54,6 +54,18 @@ def test_walkthrough_route_and_action_card():
     assert len(at.code) >= 1, "action card text missing"
 
 
+def test_walkthrough_terrain_tab_explains_itself():
+    at = goto(boot(), NAV[4])
+    button(at, label="Terrain").click(); at.run(); no_exc(at)
+    md = _md(at)
+    assert "How to read this map" in md, "map reading guide missing"
+    assert "Your ground, east to west" in md, "terrain profile heading missing"
+    assert "Water here" in md, "person-vs-water gauge missing"
+    assert "Plain reading" in md
+    assert any(m.label and m.label.startswith("Water at the core") for m in at.metric), \
+        "core water-depth metric missing"
+
+
 def test_telemetry_has_freshness_and_sensor_panel():
     at = goto(boot(), NAV[3])
     no_exc(at)
