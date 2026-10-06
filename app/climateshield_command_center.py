@@ -1403,35 +1403,56 @@ def _fragment_tel():
                 """)
 
     st.subheader("📟 Official sensor network — DOST-ASTI PhilSensors (Pangasinan)")
-    with st.spinner("Checking PhilSensors (cached 30 min)…"):
-        ps = gauges.fetch_pangasinan()
-    if ps.get("error"):
-        st.warning(ps["error"])
-    sts = [x for x in ps.get("stations", []) if "error" not in x]
+    ps = gauges.read_cache()
+    if ps is None:
+        st.info("No station check stored yet. Press **Check the stations now** — the station list is large and the "
+                "public page is slow, so the first check can take a couple of minutes with progress shown.")
+        if st.button("Check the stations now (~1–2 min, with progress)", key="ps_first"):
+            with st.status("Checking PhilSensors…", expanded=True) as stt:
+                ps = gauges.fetch_pangasinan(force=True, nearest=8,
+                                             progress=lambda i, n, label: stt.update(
+                                                 label=f"Checking PhilSensors… {label} ({i + 1}/{n + 1})"))
+            st.toast("Station check done")
+            st.rerun()
+    else:
+        c1, c2 = st.columns([3, 1])
+        c1.caption(f"Last check: **{ps.get('fetched_at') or 'unknown'}** · live readings pulled for the "
+                   f"{ps.get('nearest', 8)} nearest water/rain stations (the public station list is ~3,000 rows, "
+                   "so we re-download it at most weekly).")
+        if c2.button("⟳ Refresh readings", key="ps_refresh"):
+            with st.status("Checking PhilSensors…", expanded=True) as stt:
+                try:
+                    ps = gauges.fetch_pangasinan(force=True, nearest=8,
+                                                 progress=lambda i, n, label: stt.update(
+                                                     label=f"Checking PhilSensors… {label} ({i + 1}/{n + 1})"))
+                except Exception as e:
+                    st.error(f"Refresh failed ({type(e).__name__}) — showing the stored check below.")
+            st.rerun()
+    if ps is not None:
+        if ps.get("error"):
+            st.warning(ps["error"])
+        psum = gauges.summary(ps)
+        sts, errs, tbl = psum["sts"], psum["errs"], psum["rows"]
+    else:
+        sts, errs, tbl = [], [], None
     if sts:
-        live_n = sum(1 for x in sts if x.get("live"))
-        newest = max((x["last_reading"] for x in sts if x.get("last_reading")), default="—")
         g1, g2, g3 = st.columns(3)
-        g1.metric("Stations reporting now (<3 h)", f"{live_n} / {len(sts)}")
-        g2.metric("Water-level stations", f"{sum(1 for x in sts if 'water' in str(x['type']).lower())}", "none inside Dagupan")
-        g3.metric("Newest public reading", newest[:16])
-        if live_n == 0:
+        g1.metric("Stations reporting now (<3 h)", f"{psum['live_n']} / {len(sts)}")
+        g2.metric("Water-level stations", f"{psum['water_n']}", "none inside Dagupan")
+        g3.metric("Newest public reading", psum["newest"][:16])
+        if psum["live_n"] == 0:
             st.markdown('<div class="cs-warn"><b>No live official river data for Dagupan.</b> Every Pangasinan '
                         'PhilSensors station\'s latest public reading is old (see table). Until a live feed is '
                         'arranged with PDRRMO / DOST-ASTI, use the manual Pantal log below.</div>', unsafe_allow_html=True)
-        tbl = pd.DataFrame([dict(station=x["location"], type=x["type"], km=x.get("km_from_dagupan"),
-                                 last_reading=x.get("last_reading") or "—",
-                                 age=(f"{x['age_hours'] / 24 / 365:.1f} yr" if (x.get("age_hours") or 0) > 24 * 365
-                                      else f"{(x.get('age_hours') or 0) / 24:.0f} d") if x.get("age_hours") is not None else "—",
-                                 latest_values=", ".join(f"{k} {v}" for k, v in (x.get("values") or {}).items()))
-                            for x in sts]).sort_values("km")
-        with st.expander(f"All {len(tbl)} Pangasinan stations (nearest first) · fetched {ps.get('fetched_at')}"):
+        with st.expander(f"{len(tbl)} nearest stations with readings · checked {ps.get('fetched_at')}"):
             st.dataframe(tbl, hide_index=True, use_container_width=True)
-            st.caption("Source: philsensors.asti.dost.gov.ph public data page (read at most every 30 min). "
+            st.caption("Source: philsensors.asti.dost.gov.ph public data page. The panel checks only the nearest "
+                       "stations live — the list itself is cached for a week. "
                        "For operational use, request official access: philsensors.asti.dost.gov.ph/datarequest/terms")
-            if st.button("Refresh now", key="ps_refresh"):
-                gauges.fetch_pangasinan(force=True)
-                st.rerun()
+        if errs:
+            st.caption(f"{len(errs)} station(s) skipped this check "
+                       f"({', '.join(str(x.get('location') or x.get('station_id')) for x in errs[:4])}"
+                       f"{'…' if len(errs) > 4 else ''}) — shown again next refresh.")
 
     st.subheader("🌊 Pantal River gauge — manual log, sheet bridge, PAGASA hook")
     prov = st.radio("Reading source", kit.GAUGE_PROVIDERS, horizontal=True, label_visibility="collapsed")
@@ -1979,18 +2000,21 @@ def _fragment_response():
 
         reqs = rsp.load_requests()
         if len(reqs):
-            st.markdown("**Queue** — edit status / unit in the table, then save. Resolving a request frees its units.")
+            st.markdown("**Queue** — work the top row down: set status, then save. Times and sources stay in "
+                        "the CSV for the debrief.")
             ed = st.data_editor(
                 reqs, hide_index=True, use_container_width=True, key="req_editor",
-                column_config={"status": st.column_config.SelectboxColumn("status", options=rsp.STATUSES),
-                               "urgency": st.column_config.SelectboxColumn("urgency", options=["critical", "high", "normal"]),
-                               "id": st.column_config.TextColumn(disabled=True),
-                               "logged_at": st.column_config.TextColumn(disabled=True),
-                               "source": st.column_config.TextColumn(disabled=True),
-                               "drill": None,
-                               "received_at": st.column_config.TextColumn(disabled=True),
-                               "assigned_at": st.column_config.TextColumn(disabled=True),
-                               "resolved_at": st.column_config.TextColumn(disabled=True)})
+                column_config={"barangay": st.column_config.TextColumn("Barangay", disabled=True),
+                               "people": st.column_config.NumberColumn("People", min_value=1, max_value=500),
+                               "need": st.column_config.TextColumn("Need", disabled=True),
+                               "urgency": st.column_config.SelectboxColumn("Urgency", options=["critical", "high", "normal"]),
+                               "contact": st.column_config.TextColumn("Contact"),
+                               "location_note": st.column_config.TextColumn("Where exactly"),
+                               "status": st.column_config.SelectboxColumn("Status", options=rsp.STATUSES),
+                               "assigned_to": st.column_config.TextColumn("Unit"),
+                               # bookkeeping stays in the CSV (debrief + scoring read these)
+                               "id": None, "logged_at": None, "source": None, "drill": None, "received_at": None,
+                               "assigned_at": None, "resolved_at": None, "updated_at": None})
             if st.button("💾 Save queue changes", key="save_q"):
                 latest = rsp.load_requests()
                 before = latest.set_index("id")["status"]
@@ -2233,7 +2257,7 @@ def _fragment_response():
         sed = st.data_editor(view, hide_index=True, use_container_width=True, key="sh_ed", height=360,
                              column_config={"status": st.column_config.SelectboxColumn("status", options=ops.SHELTER_STATUS),
                                             "shelter_id": st.column_config.TextColumn(disabled=True),
-                                            "lat": None, "lon": None, "updated_at": st.column_config.TextColumn(disabled=True),
+                                            "lat": None, "lon": None, "updated_at": None,
                                             "elev_m": st.column_config.NumberColumn("ground m", disabled=True, format="%.1f"),
                                             "headcount": st.column_config.ProgressColumn("headcount", min_value=0,
                                                                                           max_value=sh_cap_max,
@@ -2294,7 +2318,8 @@ def _fragment_response():
                              column_config={"type": st.column_config.SelectboxColumn("type", options=ops.RESOURCE_TYPES),
                                             "status": st.column_config.SelectboxColumn("status", options=ops.RESOURCE_STATUS),
                                             "location": st.column_config.SelectboxColumn("location", options=sorted(L.brgy["barangay"].tolist())),
-                                            "updated_at": st.column_config.TextColumn(disabled=True)})
+                                            "assigned_request": st.column_config.TextColumn("On job", disabled=True),
+                                            "updated_at": None})
         if st.button("💾 Save resources", key="save_res"):
             red = _merge_edits("res_ed", rs, ops.load_resources(), "unit_id").fillna("")
             nums = [int(x[1:]) for x in red["unit_id"].astype(str) if x[:1] == "U" and x[1:].isdigit()]

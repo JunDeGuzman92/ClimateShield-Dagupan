@@ -550,7 +550,11 @@ def debrief_figure(L, state, sc=None):
     for i, e in enumerate(fired):
         x = mins(e["fired_at"])
         ax.axvline(x, color="#dc2626", lw=0.8, ls=":", alpha=0.8)
-        ax.text(x, 0.985, e["id"], color="#dc2626", fontsize=7, rotation=90, va="top",
+        # alternate label heights so neighbouring complications never print on top of each other;
+        # storm hour included so labels carry meaning even where dense
+        ylab = 0.97 if i % 2 == 0 else 0.89
+        ax.text(x, ylab, f"{e['id']}·h{e['h']:,.0f}", color="#dc2626", fontsize=7, rotation=90,
+                va="top", ha="right" if x / max(total_min, 1e-9) > 0.92 else "left",
                 transform=ax.get_xaxis_transform())
     ax.set_xlim(0, total_min)
     ax.legend(handles=[
@@ -572,12 +576,17 @@ def debrief_figure(L, state, sc=None):
         ("Pitfalls", f"{k.get('shelters_overfilled', 0)} overfilled · {k.get('unsafe_shelters_occupied', 0)} unsafe occupied"),
     ]
     ax2.axis("off")
-    y = 0.95
-    for label, val in rows:
-        ax2.text(0.01, y, f"{label}:", fontsize=9, fontweight="bold", va="top", color="#1f2937")
-        ax2.text(0.30, y, str(val), fontsize=9, va="top", color="#374151")
-        y -= 0.125
-    ax2.text(0.01, 0.02, "ClimateShield-Dagupan exercise debrief · simulator only · "
+    # auto-layout table for the score rows — hand-stacked text once printed over the footer line
+    tbl = ax2.table(
+        cellText=[[label, val] for label, val in rows], colWidths=[0.30, 0.70], loc="upper center",
+        cellLoc="left", bbox=[0.0, 0.06, 1.0, 0.90])
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9)
+    for (r, c), cell in tbl.get_celld().items():
+        cell.set_edgecolor("none")
+        cell.set_text_props(color="#1f2937" if c == 1 else "#111827",
+                            weight="normal" if c == 1 else "bold")
+    fig.text(0.02, 0.01, "ClimateShield-Dagupan exercise debrief · simulator only · "
              f"storm hour {state.get('final_hour', 0):.0f} at ×{speed:g}", fontsize=7.5, color="#6b7280")
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=140, bbox_inches="tight", facecolor="white")

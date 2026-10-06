@@ -62,3 +62,10 @@ def test_debrief_figure_renders_the_run(layers):
     fig, png = exercise.debrief_figure(layers, st_)
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 20000
     assert st_["final_score"]["kpis"]["requests"] == 1
+    ax = fig.axes[0]
+    labs = [t.get_text() for t in ax.texts if t.get_text().startswith("E")]
+    assert labs, "event labels missing from the debrief chart"
+    ys = {round(t.get_position()[1], 3) for t in ax.texts if t.get_text().startswith("E")}
+    assert len(ys) >= 2, "event labels must stagger at two heights"
+    tables = [c for c in fig.axes[1].get_children() if type(c).__name__ == "Table"]
+    assert tables, "score rows must use an auto-layout Table (hand-stacked text overlapped the footer)"

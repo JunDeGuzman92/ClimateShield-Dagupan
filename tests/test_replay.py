@@ -23,6 +23,24 @@ def test_replay_frames_use_calendar_labels_and_start_sensibly(layers):
     assert any(f["W"] > 0 for f in fr)
 
 
+def test_replay_water_never_dips_below_the_dry_stage(layers):
+    """Regression: early-window storage barely above onset once mapped tiny shares onto the raw DEM's
+    negative sliver (down to −2 m), showing 'water at −1.8 m'. The floor is the dry stage."""
+    import replay
+    for key in replay.EVENTS:
+        st_ = replay.build_story(layers, key, "as_happened")
+        assert min(st_["W_series"]) >= -0.36, f"{key}: water dips to {min(st_['W_series']):.2f}"
+    assert exercise_water_matches_frames(layers, "habagat_2026")
+
+
+def exercise_water_matches_frames(layers, key):
+    import exercise
+    import numpy as np
+    import replay
+    st_ = replay.build_story(layers, key, "as_happened")
+    return all(exercise.water_at(layers, st_, h) >= -0.36 for h in np.arange(0, 100, 2.0))
+
+
 def test_prepared_city_floods_less(layers):
     import mapfilm
     import replay

@@ -14,6 +14,7 @@ import pandas as pd
 TAU_DAYS = 6.0
 ONSET_MM = 120.0
 TIDE_M = 0.0        # calibration events already include their real tides — don't add more
+DRY = -0.35         # pre-storm (and post-storm) stage: below all land, so films start and end dry
 CAP_SHARE = 80.0
 STEP_H = 6
 
@@ -85,7 +86,9 @@ def build_story(L, key, readiness="as_happened"):
     W = []
     for s in S_h:
         sh = share_from_storage(L, s)
-        W.append((L.water_level_for_share(sh) if sh > 0 else -0.35) + TIDE_M + adj)
+        # Floor at the dry stage: tiny shares sit in the raw DEM's negative sliver (down to −2 m),
+        # which would read as "water at −1.8 m" — nonsense. The scripted branch floors the same way.
+        W.append(max((L.water_level_for_share(sh) if sh > 0 else DRY) + TIDE_M + adj, DRY))
     W = np.array(W)
     beats, labels = [], []
     for i, d in enumerate(days):
