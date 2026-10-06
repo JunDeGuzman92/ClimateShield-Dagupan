@@ -54,7 +54,13 @@ def frame_stats(L, W, evac_frac):
 
 
 def storm_frames(L, story, hours=40, n=16):
-    """Hourly frames for a story: water level, stats, caption and a depth PNG (base64)."""
+    """Hourly frames for a story: water level, stats, caption and a depth PNG (base64).
+
+    Scripted stories use the proxy rise/recession curve; replay stories (story["replay"]) carry their own
+    water series from the historical rainfall record (see replay.py).
+    """
+    if story.get("replay"):
+        return _replay_frames(L, story)
     DRY = -0.35
     base_W = L.water_level_for_share(story["share"])
     peak = base_W + story["tide"] + 0.45 * story["clog"] - (0.22 if story["pumps"] else 0.0)
@@ -81,6 +87,30 @@ def storm_frames(L, story, hours=40, n=16):
     return frames
 
 
+def _replay_frames(L, story, max_frames=48):
+    hours = np.array(story["hours"], dtype=float)
+    Ws = np.array(story["W_series"], dtype=float)
+    idx = np.unique(np.linspace(0, len(hours) - 1, min(max_frames, len(hours))).round().astype(int))
+    vmax = max(0.8, float(Ws.max()) + 0.3)
+    peak_h, warn = story["peak_h"], story["warning_h"]
+    frames = []
+    for i in idx:
+        h, W = float(hours[i]), float(Ws[i])
+        if warn > 0:
+            ef = float(np.clip((h - (peak_h - warn - 6)) / max(warn, 1), 0, 1)) * 0.88
+        else:
+            ef = float(np.clip((h - (peak_h - 6)) / 18.0, 0, 1)) * 0.35
+        depth, st = frame_stats(L, W, ef)
+        png, _ = kit.depth_png(depth, vmax=vmax, L=L)
+        text = story["beats"][0][1]
+        for bh, t in story["beats"]:
+            if h >= bh:
+                text = t
+        frames.append(dict(hour=h, W=W, caption=text, label=story["labels"][i],
+                           png=base64.b64encode(png).decode(), **st))
+    return frames
+
+
 def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, height=600,
               autoplay=True, interval_ms=1100):
     m = _base(center, zoom, satellite=True, height=height)
@@ -101,7 +131,8 @@ def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, hei
                                 tooltip=f"{fct['category']}: {fct['name'] or '?'} · ground {fct['elev_m']:.1f} m").add_to(m)
 
     meta = [dict(hour=f["hour"], W=f["W"], caption=f["caption"], pop_in=f["pop_in"], bldg=f["bldg"],
-                 roads_km=f["roads_km"], evacuated=f["evacuated"], stranded=f["stranded"]) for f in frames]
+                 roads_km=f["roads_km"], evacuated=f["evacuated"], stranded=f["stranded"],
+                 label=f.get("label", "")) for f in frames]
     mid = m.get_name()
     hmax = int(frames[-1]["hour"])
     smax = max(1.0, max(f["stranded"] for f in frames))
@@ -173,7 +204,7 @@ def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, hei
       function show(k) {{
         i = k; var f = meta[k];
         ovs.forEach(function(o, j){{ o.setOpacity(j === k ? 0.82 : 0); }});
-        $('hour').textContent = 'HOUR ' + String(Math.round(f.hour)).padStart(2, '0') + (f.hour >= 24 ? ' · day 2' : '');
+        $('hour').textContent = f.label ? f.label : 'HOUR ' + String(Math.round(f.hour)).padStart(2, '0') + (f.hour >= 24 ? ' · day ' + (Math.floor(f.hour / 24) + 1) : '');
         $('w').textContent = f.W <= 0 ? 'streets dry' : 'water +' + f.W.toFixed(2) + ' m';
         $('cap').innerHTML = '<b>' + $('hour').textContent + '</b>' + f.caption;
         $('p').textContent = fmt(f.pop_in); $('e').textContent = fmt(f.evacuated);

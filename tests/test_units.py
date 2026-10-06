@@ -82,6 +82,16 @@ def test_exercise_water_matches_timelapse_physics(layers):
         assert abs(exercise.water_at(layers, story, f["hour"]) - f["W"]) < 1e-6
 
 
+def test_briefing_always_produces_a_document(layers):
+    """build_briefing must degrade PDF→PNG when the PDF backend is blocked (Windows App Control), never crash."""
+    import kit
+    row = layers.brgy.iloc[0]
+    data, ext = kit.build_briefing(row, None, 0.5, 100, "Test scenario", "English")
+    assert ext in ("pdf", "png")
+    assert data[:4] == b"%PDF" if ext == "pdf" else data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert len(data) > 5000
+
+
 def test_no_hardcoded_old_page_labels_in_app():
     """Guard against the fragment-rebuild bug class: every page guard must have a matching fragment."""
     src = Path(APP_DIR / "climateshield_command_center.py").read_text(encoding="utf-8")

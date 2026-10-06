@@ -21,6 +21,19 @@ def test_deck_scenario_tabs_and_controls():
     assert "Same storm, different city" in _md(at)
 
 
+def test_deck_replay_tab():
+    at = boot()
+    no_exc(at)
+    assert len(at.tabs) == 4
+    ev = next(s for s in at.selectbox if s.key == "rp_ev")
+    ev.set_value("pepeng_2009"); at.run(); no_exc(at)
+    rd = next(s for s in at.radio if s.key == "rp_rd")
+    rd.set_value("prepared"); at.run(); no_exc(at)
+    assert any("469 mm" in c.value for c in at.caption), "selected event's note not shown"
+    assert any("Land flooded" in m.value for m in at.markdown), "replay summary tiles missing"
+    assert any("Peak water" in m.value for m in at.markdown)
+
+
 def test_simulator_views():
     at = goto(boot(), NAV[1])
     view = lambda: next(r for r in at.radio if r.key == "sim_view")  # noqa: E731 — re-fetch after every rerun

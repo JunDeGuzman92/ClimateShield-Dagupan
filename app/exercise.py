@@ -14,6 +14,7 @@ import pandas as pd
 import cinema
 import kit
 import ops
+import replay
 import response as rsp
 import sms
 
@@ -25,13 +26,22 @@ MAX_H = 40.0
 
 # ----------------------------------------------------------------------------- storm physics at an hour
 def water_at(L, story, h):
-    """Same proxy physics as the time-lapse (cinema/mapfilm), for a single storm hour."""
+    """Water level at a storm hour. Scripted stories use the proxy rise/recession curve; replay stories
+    carry their own series from the historical rainfall record (replay.py)."""
+    if story.get("replay"):
+        return replay.water_at(story, h)
     peak = (L.water_level_for_share(story["share"]) + story["tide"] + 0.45 * story["clog"]
             - (0.22 if story["pumps"] else 0.0))
     W = kit.curve_W(peak, -0.35, float(h), rise_h=10.0, tau=16.0 + 32.0 * story["clog"])
     if story.get("surge", 0) > 0 and h >= 10:
         W += story["surge"] * np.exp(-((h - 13.0) ** 2) / 18.0)
     return float(W)
+
+
+def story_max_h(story):
+    if story.get("replay"):
+        return float(story["hours"][-1])
+    return MAX_H
 
 
 def caption_at(story, h):
@@ -58,41 +68,57 @@ def sim_hour(state, now=None):
         return float(state.get("final_hour", 0.0))
     now = now or datetime.now()
     mins = (now - datetime.fromisoformat(state["started_at"])).total_seconds() / 60.0
-    return float(min(MAX_H, mins * float(state["speed"])))
+    return float(min(state.get("max_h", MAX_H), mins * float(state["speed"])))
 
 
 def build_events(L, story, pilot):
-    """Scripted complications. Targets that depend on live state are resolved when the event fires."""
-    W_peak = water_at(L, story, 10.0)
+    """Scripted complications, positioned around the storm's peak. Targets that depend on live state
+    are resolved when the event fires."""
+    if story.get("replay"):
+        max_h = story_max_h(story)
+        peak = max(story["peak_h"], 10.0)
+        onset = next((hh for hh in story["hours"] if water_at(L, story, hh) > 0), peak * 0.5)
+        up, down = max(peak - onset, 1.0), max(max_h - peak, 1.0)
+        sched = [max(1.0, round(onset + f * up, 1)) for f in (0.05, 0.35, 0.55, 0.70, 0.85)] \
+            + [round(peak, 1)] \
+            + [round(peak + f * down, 1) for f in (0.15, 0.50, 0.90)]
+    else:
+        sched = [1.0, 4.0, 6.0, 7.0, 9.0, 10.0, 12.0, 16.0, 24.0]
+    W_peak = water_at(L, story, story.get("peak_h", 10.0))
     exp = L.exposure(L.depth_grid(W_peak)[0], W_peak)
     road = (exp["roads_cut_worst"][0]["name"] if exp["roads_cut_worst"] else "the main road").title()
     p0 = pilot[0] if pilot else "Pantal"
+    peak_day = ""
+    if story.get("replay"):
+        import pandas as pd
+        peak_day = f" (storm peak {pd.Series(story['W_series'], story['hours']).idxmax():.0f} h into the replay)"
     return [
-        dict(id="E1", h=1.0, kind="texts", n=3, title="First help texts arrive",
+        dict(id="E1", h=sched[0], kind="texts", n=3, title="First help texts arrive",
              detail="Residents in low streets report rising water.", hint="Turn each text into a request."),
-        dict(id="E2", h=4.0, kind="road", title=f"{road} impassable",
+        dict(id="E2", h=sched[1], kind="road", title=f"{road} impassable",
              detail=f"Water over {road}; light vehicles stall.", hint="Re-route trucks; prefer boats for that area."),
-        dict(id="E3", h=6.0, kind="texts", n=4, title="Second wave of texts", detail="More households cut off.",
+        dict(id="E3", h=sched[2], kind="texts", n=4, title="Second wave of texts", detail="More households cut off.",
              hint="Prioritise critical (rooftop, child, elderly)."),
-        dict(id="E4", h=7.0, kind="shelter_power", title="Evacuation centre loses power",
+        dict(id="E4", h=sched[3], kind="shelter_power", title="Evacuation centre loses power",
              detail="Generator failed; centre marked UNSAFE.", hint="Move evacuees elsewhere; stop sending people there."),
-        dict(id="E5", h=9.0, kind="unit_down", title="Boat engine failure",
+        dict(id="E5", h=sched[4], kind="unit_down", title="Boat engine failure",
              detail="A unit is out of service (maintenance).", hint="Reassign its request to another unit."),
-        dict(id="E6", h=10.0, kind="texts", n=6, title="PEAK — surge of rescue texts",
+        dict(id="E6", h=sched[5], kind="texts", n=6, title="PEAK — surge of rescue texts" + peak_day,
              detail=f"Rooftop reports concentrated near {p0}.", hint="Triage: critical first."),
-        dict(id="E7", h=12.0, kind="facility_flooded", title="Clinic takes water",
+        dict(id="E7", h=sched[6], kind="facility_flooded", title="Clinic takes water",
              detail="A health facility near the practice area is flooded.", hint="Route medical requests to a dry hospital."),
-        dict(id="E8", h=16.0, kind="texts", n=3, title="Late texts: food and water",
+        dict(id="E8", h=sched[7], kind="texts", n=3, title="Late texts: food and water",
              detail="Stranded families now need supplies.", hint="Use halls/shelters for relief goods."),
-        dict(id="E9", h=24.0, kind="info", title="Water receding",
-             detail="Day 2: roads reopening.", hint="Plan returns; resolve finished requests."),
+        dict(id="E9", h=sched[8], kind="info", title="Water receding",
+             detail="Roads reopening as stored rain drains away.", hint="Plan returns; resolve finished requests."),
     ]
 
 
-def start(L, story_key, speed, pilot, team):
-    story = cinema.FLOOD_STORIES[story_key]
+def start(L, story, speed, pilot, team):
+    """story: a full story dict — a scripted one (cinema.FLOOD_STORIES[key]) or a replay (replay.build_story)."""
     ops.reset_simulation(L)
-    st = dict(running=True, team=team or "Team", story_key=story_key, speed=float(speed), pilot=pilot or ["Pantal"],
+    st = dict(running=True, team=team or "Team", story=story, speed=float(speed), pilot=pilot or ["Pantal"],
+              max_h=story_max_h(story),
               started_at=datetime.now().isoformat(timespec="seconds"), events=build_events(L, story, pilot))
     save(st)
     return st
@@ -144,7 +170,7 @@ def tick(L, state=None):
     if not state.get("running"):
         return state, []
     h = sim_hour(state)
-    story = cinema.FLOOD_STORIES[state["story_key"]]
+    story = state["story"]
     fired = []
     for ev in state["events"]:
         if not ev.get("fired_at") and ev["h"] <= h:
@@ -242,7 +268,7 @@ def stop(L):
     save(state)
     sc = score(L, state)
     k = sc["kpis"]
-    row = dict(finished=state["stopped_at"], team=state["team"], scenario=cinema.FLOOD_STORIES[state["story_key"]]["title"],
+    row = dict(finished=state["stopped_at"], team=state["team"], scenario=state["story"]["title"],
                storm_hours=round(state["final_hour"], 1), score=sc["total"], grade=sc["grade"], requests=k["requests"],
                resolved_pct=round(100 * k["resolved_pct"]), intake_min=round(k["intake_min"], 1) if np.isfinite(k["intake_min"]) else "",
                assign_min=round(k["assign_min"], 1) if np.isfinite(k["assign_min"]) else "",

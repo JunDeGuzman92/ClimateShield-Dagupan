@@ -68,15 +68,16 @@ def test_full_exercise_run(layers):
 
 def test_score_rewards_better_response(layers):
     """A team that answers and resolves everything must outscore one that does nothing."""
+    import cinema
     import exercise
     import response as rsp
     import sms
-    exercise.start(layers, "unprepared", 4, ["Pantal"], "idle")
+    exercise.start(layers, cinema.FLOOD_STORIES["unprepared"], 4, ["Pantal"], "idle")
     _shift(1.5)
     exercise.tick(layers)
     idle = exercise.score(layers)["total"]
 
-    exercise.start(layers, "unprepared", 4, ["Pantal"], "active")
+    exercise.start(layers, cinema.FLOOD_STORIES["unprepared"], 4, ["Pantal"], "active")
     _shift(1.5)
     exercise.tick(layers)
     inbox = sms.load_log(sms.INBOX)

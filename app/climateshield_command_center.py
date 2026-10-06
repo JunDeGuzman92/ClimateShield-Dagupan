@@ -27,6 +27,7 @@ import ops
 import gauges
 import demimport
 import exercise
+import replay
 
 ROOT = APP_DIR.parent
 CHARTS = ROOT / "outputs" / "charts"
@@ -271,23 +272,39 @@ def plotly_beige(fig, height=None, y_title=None, title=None):
     return fig
 
 
-@st.cache_data(show_spinner=False, max_entries=24)
-def storm_html(key, params, height):
-    """Map time-lapse HTML for a story (or a custom params dict) + summary; cached per inputs."""
-    story = cinema.FLOOD_STORIES[key] if key in cinema.FLOOD_STORIES else cinema.custom_story(**params)
-    frames = mapfilm.storm_frames(L, story)
-    sub = (f"tide +{story['tide']:.2f} m · drains {story['clog'] * 100:.0f}% blocked · pumps "
-           f"{'on' if story['pumps'] else 'off'} · warning {story['warning_h']} h · proxy physics on GLO-30 terrain")
+def _render_storm(frames, story, height, sub):
     m = mapfilm.storm_map(L, frames, story["title"], sub, height=height)
     html = m.get_root().render()
     peak = max(frames, key=lambda f: f["W"])
     worst = max(frames, key=lambda f: f["stranded"])
-    summary = dict(title=story["title"], peak_W=peak["W"], peak_hour=peak["hour"], pop_in=peak["pop_in"],
+    span = float(story["hours"][-1]) if story.get("replay") else 40.0
+    summary = dict(title=story["title"], peak_W=peak["W"], peak_hour=peak["hour"],
+                   peak_label=peak.get("label", ""), pop_in=peak["pop_in"],
                    bldg=peak["bldg"], roads_km=peak["roads_km"], stranded=worst["stranded"],
-                   evacuated=max(f["evacuated"] for f in frames), tide=story["tide"], clog=story["clog"],
-                   pumps=story["pumps"], warning_h=story["warning_h"],
-                   hours_wet=sum(1 for f in frames if f["W"] > 0.15) * (40 / len(frames)))
+                   evacuated=max(f["evacuated"] for f in frames), tide=story.get("tide", 0.0),
+                   clog=story.get("clog", 0.0), pumps=story.get("pumps", False),
+                   warning_h=story.get("warning_h", 0.0),
+                   flooded_share=L.flooded_share(peak["W"]),
+                   hours_wet=sum(1 for f in frames if f["W"] > 0.15) * (span / len(frames)))
     return html, summary
+
+
+@st.cache_data(show_spinner=False, max_entries=24)
+def storm_html(key, params, height):
+    """Map time-lapse HTML for a story (or a custom params dict) + summary; cached per inputs."""
+    story = cinema.FLOOD_STORIES[key] if key in cinema.FLOOD_STORIES else cinema.custom_story(**params)
+    sub = (f"tide +{story['tide']:.2f} m · drains {story['clog'] * 100:.0f}% blocked · pumps "
+           f"{'on' if story['pumps'] else 'off'} · warning {story['warning_h']} h · proxy physics on GLO-30 terrain")
+    return _render_storm(mapfilm.storm_frames(L, story), story, height, sub)
+
+
+@st.cache_data(show_spinner=False, max_entries=12)
+def replay_storm_html(ev_key, readiness, height):
+    """Time-lapse for a real historical event, driven by the recorded daily rainfall (replay.py)."""
+    story = replay.build_story(L, ev_key, readiness)
+    sub = (f"real daily rainfall (NASA POWER 1981–2026) → water storage → proxy flood share "
+           f"· readiness: {replay.READINESS[readiness]['label'].lower()}")
+    return _render_storm(mapfilm.storm_frames(L, story), story, height, sub)
 
 
 def factor_tile(label, value, sub=""):
@@ -729,7 +746,8 @@ if page == NAV[0]:
         st.markdown('<div class="cs-kicker" style="margin-top:6px">Scenario time-lapse · on the satellite map</div>',
                     unsafe_allow_html=True)
         st.markdown("### 🎬 What happens when… and what decides it")
-        tab_f, tab_h, tab_c = st.tabs(["🌊 Flood scenarios", "🔥 Heat scenarios", "🎛️ Build your own storm"])
+        tab_f, tab_h, tab_c, tab_r = st.tabs(["🌊 Flood scenarios", "🔥 Heat scenarios", "🎛️ Build your own storm",
+                                              "🌩 Real storm replays"])
 
         with tab_f:
             fkeys = list(cinema.FLOOD_STORIES.keys())
@@ -818,6 +836,40 @@ if page == NAV[0]:
             g2.markdown(factor_tile("People in water", f"{sc['pop_in']:,.0f}", "at the peak"), unsafe_allow_html=True)
             g3.markdown(factor_tile("Moved to shelters", f"{sc['evacuated']:,.0f}", f"{c_warn} h head start"), unsafe_allow_html=True)
             g4.markdown(factor_tile("Stranded", f"{sc['stranded']:,.0f}", "the number to drive to zero"), unsafe_allow_html=True)
+
+        with tab_r:
+            st.caption("Real events from the 45-year record (1981–2026), replayed on today's city. A rainfall-storage "
+                       "curve (6-day memory) links each day's recorded rain to the proxy flood share, anchored so the "
+                       "Aug 2026 habagat matches the CDRRMO 23/31-barangay report and Pepeng 2009 hits the Extreme class.")
+            r1, r2 = st.columns([1, 1.5])
+            with r1:
+                r_ev = st.selectbox("Historical event", list(replay.EVENTS.keys()),
+                                    format_func=lambda k: replay.EVENTS[k]["label"], key="rp_ev")
+                r_rd = st.radio("City readiness", list(replay.READINESS.keys()),
+                                format_func=lambda k: replay.READINESS[k]["label"], key="rp_rd",
+                                help=replay.READINESS["prepared"]["note"])
+                st.caption(replay.EVENTS[r_ev]["note"])
+                story_r = replay.build_story(L, r_ev, r_rd)
+                figh = go.Figure()
+                figh.add_bar(x=[d for d, _ in story_r["daily_rain"]], y=[r for _, r in story_r["daily_rain"]],
+                             name="rain/day (mm)", marker_color="#38bdf8")
+                figh.add_trace(go.Scatter(x=[d for d, _ in story_r["daily_rain"]],
+                                          y=[replay.water_at(story_r, i * 24 + 12) for i in range(len(story_r["daily_rain"]))],
+                                          name="water level (m)", yaxis="y2",
+                                          line=dict(color="#dc2626", width=2.5)))
+                figh.update_layout(height=230, margin=dict(l=8, r=8, t=24, b=8), barmode="overlay",
+                                   legend=dict(orientation="h", y=1.15, x=0, font=dict(size=10)),
+                                   yaxis=dict(title="mm/day", gridcolor=PLOT_GRID),
+                                   yaxis2=dict(title="m", overlaying="y", side="right", range=[-0.4, 1.2], gridcolor=PLOT_GRID))
+                st.plotly_chart(plotly_beige(figh, height=230), use_container_width=True, config={"displayModeBar": False})
+            with r2:
+                r_html, rs = replay_storm_html(r_ev, r_rd, 500)
+                components.html(r_html, height=500 + STORM_STRIP_PX, scrolling=False)
+                q1, q2, q3, q4 = st.columns(4)
+                q1.markdown(factor_tile("Peak water", f"+{rs['peak_W']:.2f} m", rs['peak_label'] or f"hour {rs['peak_hour']:.0f}"), unsafe_allow_html=True)
+                q2.markdown(factor_tile("Land flooded", f"{rs['flooded_share']:.0f}%", f"{rs['pop_in']:,.0f} people in water"), unsafe_allow_html=True)
+                q3.markdown(factor_tile("Stranded at worst", f"{rs['stranded']:,.0f}", f"{rs['hours_wet']:.0f} h of flooded streets"), unsafe_allow_html=True)
+                q4.markdown(factor_tile("Roads cut", f"{rs['roads_km']:.0f} km", f"{rs['bldg']:,} buildings in water"), unsafe_allow_html=True)
 
     st.markdown("#### Where do you want to go?")
     na, nb, nc, nd, ne = st.columns(5)
@@ -1090,11 +1142,15 @@ def _fragment_sim():
                 card = kit.action_card_flood(brow, W, int(br["affected (est)"]), PAG_CLASSES[scen],
                                              lang=PREFS.get("lang", "English"))
                 st.code(card, language=None)
-                pdf = kit.build_briefing(brow, None, W, int(br["affected (est)"]), PAG_CLASSES[scen],
-                                         PREFS.get("lang", "English"), map_fig_fn=None,
-                                         city_meta=L.meta, susc=float(brow.get("mean_susc_300m", 0) or 0))
-                st.download_button("⬇ One-page barangay briefing (PDF)", data=pdf,
-                                   file_name=f"climateshield_briefing_{bname}.pdf", mime="application/pdf")
+                brief, bext = kit.build_briefing(brow, None, W, int(br["affected (est)"]), PAG_CLASSES[scen],
+                                                 PREFS.get("lang", "English"), map_fig_fn=None,
+                                                 city_meta=L.meta, susc=float(brow.get("mean_susc_300m", 0) or 0))
+                st.download_button(f"⬇ One-page barangay briefing ({bext.upper()})", data=brief,
+                                   file_name=f"climateshield_briefing_{bname}.{bext}",
+                                   mime="application/pdf" if bext == "pdf" else "image/png")
+                if bext == "png":
+                    st.caption("PDF export is unavailable on this machine (a Windows security policy blocks the PDF "
+                               "library) — the briefing downloads as a printable image instead.")
                 st.caption("Copy-ready for SMS/Viber/Facebook. Full guided flow in 🗺️ Barangay Walkthrough.")
 
 
@@ -1552,13 +1608,17 @@ def _fragment_wlk():
                                           lang=PREFS.get("lang", "English"))
             st.subheader("🌊 Flood action card (Calamity-class preparedness)")
         st.code(card, language=None)
-        pdf = kit.build_briefing(row, anchor, W_c, est, "Calamity-class (Aug 2026-type event)",
-                                  PREFS.get("lang", "English"),
-                                  map_fig_fn=(lambda: make_local_fig(anchor, sel)) if anchor else None,
-                                  city_meta=L.meta, susc=float(row.get("mean_susc_300m", 0) or 0))
-        st.download_button("⬇ One-page barangay briefing (PDF)", data=pdf,
-                           file_name=f"climateshield_briefing_{sel}.pdf", mime="application/pdf",
+        brief, bext = kit.build_briefing(row, anchor, W_c, est, "Calamity-class (Aug 2026-type event)",
+                                         PREFS.get("lang", "English"),
+                                         map_fig_fn=(lambda: make_local_fig(anchor, sel)) if anchor else None,
+                                         city_meta=L.meta, susc=float(row.get("mean_susc_300m", 0) or 0))
+        st.download_button(f"⬇ One-page barangay briefing ({bext.upper()})", data=brief,
+                           file_name=f"climateshield_briefing_{sel}.{bext}",
+                           mime="application/pdf" if bext == "pdf" else "image/png",
                            use_container_width=True)
+        if bext == "png":
+            st.caption("PDF export is unavailable on this machine (a Windows security policy blocks the PDF library) — "
+                       "the briefing downloads as a printable image instead.")
         st.caption("Copy-paste ready for the barangay Facebook page, Viber group, or SMS blast.")
 
 
@@ -1616,20 +1676,42 @@ def _fragment_exercise():
                        "complications are injected as it unfolds; you get a score at the end. Starting resets the "
                        "simulation (requests, messages, unit assignments, shelter headcounts) — practice capacities and "
                        "units you registered are kept.")
-            e1, e2, e3, e4 = st.columns([1.2, 1.6, 1, 0.9])
+            e1, e2, e3, e4 = st.columns([1.2, 1.9, 1.1, 0.9])
             team = e1.text_input("Team name", PREFS.get("ex_team", "Team A"), key="ex_team")
-            keys = list(cinema.FLOOD_STORIES.keys())
-            sk = e2.selectbox("Storm", keys, format_func=lambda k: cinema.FLOOD_STORIES[k]["title"], key="ex_story")
-            speed = e3.select_slider("Storm-hours per real minute", [1, 2, 4, 8], value=4, key="ex_speed",
-                                     help="4 → the 40-hour storm takes 10 minutes")
+            mode = e2.radio("Storm source", ["📖 Story storms", "🌩 Real storm replays"], horizontal=True,
+                             label_visibility="collapsed", key="ex_mode")
+            if mode.startswith("📖"):
+                keys = list(cinema.FLOOD_STORIES.keys())
+                sk = e2.selectbox("Story storm", keys, format_func=lambda k: cinema.FLOOD_STORIES[k]["title"], key="ex_story")
+                story = cinema.FLOOD_STORIES[sk]
+                speed_opts = [1, 2, 4, 8]
+                sdef = 4
+                shelp = "4 → the 40-hour story storm takes 10 minutes"
+            else:
+                ev_keys = list(replay.EVENTS.keys())
+                evk = e2.selectbox("Historical event", ev_keys, format_func=lambda k: replay.EVENTS[k]["label"], key="ex_event")
+                rkeys = list(replay.READINESS.keys())
+                rk = e2.selectbox("City readiness", rkeys, format_func=lambda k: replay.READINESS[k]["label"],
+                                  key="ex_readiness", help=replay.READINESS[list(replay.READINESS.keys())[0]]["note"])
+                story = replay.build_story(L, evk, rk)
+                speed_opts = [12, 24, 48, 96]
+                sdef = 48
+                shelp = "48 → a month-long replay runs in ~18 minutes. Replay = real 1981–2026 daily rainfall driving the proxy model."
+            speed_label = f"{int(speed_opts[0])}–{int(speed_opts[-1])}"
+            speed = e3.select_slider("Storm-hours per real minute", speed_opts, value=sdef, key="ex_speed", help=shelp)
             e4.write("")
             if e4.button("▶ Start", type="primary", use_container_width=True, key="ex_start"):
                 PREFS["ex_team"] = team
                 save_prefs(PREFS)
-                exercise.start(L, sk, speed, PREFS.get("pilot") or ["Pantal"], team)
+                exercise.start(L, story, speed, PREFS.get("pilot") or ["Pantal"], team)
                 st.rerun(scope="app")
+            if mode.startswith("🌩"):
+                st.caption(f"**{story['title']}** — {story['note']}")
+                dr = story["daily_rain"]
+                st.caption("Daily rain in the event window: " + " ".join(
+                    f"{d} {r:.0f}" for d, r in dr if r >= 50) or "no heavy-rain day (≥50 mm) in this window")
             if state.get("final_score"):
-                st.markdown(f"**Last run — {state.get('team')}** · {cinema.FLOOD_STORIES[state['story_key']]['title']} "
+                st.markdown(f"**Last run — {state.get('team')}** · {state['story']['title']} "
                             f"· stopped at storm hour {state.get('final_hour', 0):.0f}")
                 _score_card(state["final_score"])
             hist = exercise.history()
@@ -1638,15 +1720,17 @@ def _fragment_exercise():
                     st.dataframe(hist, hide_index=True, use_container_width=True)
             return
 
-        story = cinema.FLOOD_STORIES[state["story_key"]]
+        story = state["story"]
+        max_h = float(state.get("max_h", 40.0))
         h = exercise.sim_hour(state)
         W = exercise.water_at(L, story, h)
+        hour_lbl = (f"h {h:,.0f} / {max_h:,.0f}" if story.get("replay") else f"{h:04.1f} / 40")
         t1, t2, t3, t4 = st.columns([1.1, 1, 3, 1])
-        t1.metric("Storm hour", f"{h:04.1f} / 40", f"×{state['speed']:g} speed", delta_color="off")
+        t1.metric("Storm clock", hour_lbl, f"×{state['speed']:g} speed", delta_color="off")
         t2.metric("Water", "streets dry" if W <= 0 else f"+{W:.2f} m", delta_color="off")
         with t3:
             st.markdown(f"**{state['team']} · {story['title']}**  \n{exercise.caption_at(story, h)}")
-            st.progress(min(h / 40.0, 1.0))
+            st.progress(min(h / max_h, 1.0))
         if t4.button("↻ Update tables", use_container_width=True, key="ex_refresh",
                      help="Events update this panel live; the tabs below refresh when you act or press this."):
             st.rerun(scope="app")
@@ -1660,14 +1744,14 @@ def _fragment_exercise():
                 c1, c2 = st.columns([5, 1])
                 if e.get("acked_at"):
                     secs = (pd.to_datetime(e["acked_at"]) - pd.to_datetime(e["fired_at"])).total_seconds()
-                    c1.markdown(f"✅ **h{e['h']:.0f} · {e['title']}** — {e['detail']} *(acknowledged in {secs:.0f}s)*")
+                    c1.markdown(f"✅ **h{e['h']:,.0f} · {e['title']}** — {e['detail']} *(acknowledged in {secs:.0f}s)*")
                 else:
-                    c1.markdown(f"🔴 **h{e['h']:.0f} · {e['title']}** — {e['detail']}  \n→ {e['hint']}")
+                    c1.markdown(f"🔴 **h{e['h']:,.0f} · {e['title']}** — {e['detail']}  \n→ {e['hint']}")
                     c2.button("Acknowledge", key=f"ack_{e['id']}", on_click=exercise.acknowledge, args=(e["id"],),
                               use_container_width=True)
-        st.caption((f"Next complication around storm hour {nxt['h']:.0f}. " if nxt else "All complications fired. ")
+        st.caption((f"Next complication around storm hour {nxt['h']:,.0f}. " if nxt else "All complications fired. ")
                    + "Live score so far: " + f"{exercise.score(L, state)['total']:.0f}/100")
-        if h >= 40:
+        if h >= max_h:
             exercise.stop(L)
             st.rerun(scope="app")
 
@@ -1703,10 +1787,10 @@ def _fragment_response():
 
     ex_state = exercise.load()
     if ex_state.get("running"):
-        _story = cinema.FLOOD_STORIES[ex_state["story_key"]]
+        _story = ex_state["story"]
         _h = exercise.sim_hour(ex_state)
         W_r = exercise.water_at(L, _story, _h)
-        st.caption(f"🎯 Exercise running — flood conditions follow storm hour {_h:.1f}: "
+        st.caption(f"🎯 Exercise running — flood conditions follow storm hour {_h:,.1f}: "
                    + ("streets dry" if W_r <= 0 else f"water +{W_r:.2f} m") + ". Facility flood states update as it rises.")
     else:
         scen_r = st.selectbox("Assume flood conditions", list(dc.SCENARIOS.keys()), index=2, key="resp_scen")
@@ -2079,6 +2163,11 @@ def _fragment_methods():
                       A LiDAR elevation model (Methods → upgrade) replaces this assumption where it has coverage.
                     - *Correction (Oct 2026):* earlier versions inverted the percentile, so Advisory flooded more land than
                       Calamity. Fixed; all scenario numbers now rise with severity.
+                    - **Real storm replays** (Command Deck → 🌩 tab) drive the same proxy model with *recorded* daily
+                      rainfall (NASA POWER 1981–2026): a 6-day storage tank accumulates rain, and the stored water is
+                      mapped to a flooded share of land through calibration anchors — Aug 2026 habagat ≈ the 45% Calamity
+                      report, Pepeng 2009 ≈ the 65% Extreme class. "If the city had prepared" subtracts illustrative
+                      drain/pump/evacuation benefits. Replays show real dates, not forecasts.
                     - Active-land footprint ({L.meta['active_land_km2']:.1f} km² of the official 44.47 km²) avoids counting
                       Lingayen Gulf municipal waters inside the OSM city polygon.
                     - WorldPop grid rescaled so city totals match PSA census; barangay impact = census × flooded fraction

@@ -5,6 +5,9 @@
 
 ## Fastest way: the timed exercise
 🚑 Response & Dispatch → **🎯 Timed exercise** panel → team name, storm, speed (×4 = 10-minute storm) → **▶ Start**.
+Storms can be 40-hour **story storms** or **real storm replays** — the Aug 2026 habagat, Pepeng 2009, Egay 2023 and
+other recorded events, spanning real calendar dates. For a month-long replay use the higher speeds (×48 ≈ 18 minutes);
+each replay can also be run "if the city had prepared" to compare response conditions.
 The storm clock drives flood conditions, complications fire on their own (text waves, road cut, shelter loses power,
 boat breaks down, clinic floods), and **⏹ Stop & score** gives a 0–100 score that is saved to **📊 Run history**
 so teams can compare. The manual script below is for facilitator-led sessions.

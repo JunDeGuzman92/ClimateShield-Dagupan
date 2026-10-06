@@ -385,9 +385,17 @@ def build_briefing(row, anchor, W, affected_est, scen_label, lang, map_fig_fn=No
     foot.text(0.97, 0.45, f"lang: {lang} · v0.5", fontsize=7.5, color="#6b7280", ha="right")
 
     buf = io.BytesIO()
-    fig.savefig(buf, format="pdf")
+    try:
+        fig.savefig(buf, format="pdf")
+        ext = "pdf"
+    except Exception:
+        # Some machines block a DLL the PDF backend needs (Windows Application Control vs fontTools).
+        # The Agg/PNG backend is unaffected — deliver the one-page briefing as an image instead.
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=200)
+        ext = "png"
     plt.close(fig)
-    return buf.getvalue()
+    return buf.getvalue(), ext
 
 
 _graph = None
