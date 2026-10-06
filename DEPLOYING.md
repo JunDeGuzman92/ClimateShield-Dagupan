@@ -4,15 +4,17 @@ The app is a normal Streamlit app — the steps below take it from your laptop t
 
 ## 1. Push the project to GitHub
 
+This folder is **already a git repository** with full history — create an empty repo on GitHub
+(new → Repository, no README/license needed), then:
+
 ```bash
 cd "C:\Users\junbu\Documents\ClimateShieldProject for Dagupan"
-git init
-git add README.md requirements.txt DEPLOYING.md .gitignore .streamlit/config.toml app/ data/app_layers/ docs/ assets/ outputs/charts/
-git commit -m "ClimateShield Dagupan v1.0 — command center"
-git branch -M main
-git remote add origin https://github.com/JunDeGuzman92/<your-new-repo>.git
+git remote add origin https://github.com/<you>/<your-new-repo>.git
 git push -u origin main
 ```
+
+Runtime CSVs (requests, shelters, ui_prefs), raw downloads and all `*.tif` are already excluded by
+`.gitignore` — personal information from exercises never leaves the laptop.
 
 What ships and why: the running app needs **only** `app/`, `data/app_layers/` (~25 MB),
 `assets/` (<1 MB), the dashboard chart in `outputs/charts/`, plus docs. Everything under

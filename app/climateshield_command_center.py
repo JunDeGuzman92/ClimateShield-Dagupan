@@ -212,18 +212,18 @@ def get_live():
             t = inst.get("air_temperature")
             if t is None:
                 raise ValueError("no temperature")
-            times, rains, probs = [], [], []
+            times, rains = [], []
             for s_ in series:
                 times.append(s_["time"])
                 rr = s_.get("data", {}).get("next_1_hours", {}).get("details", {}).get("precipitation_amount", 0.0)
                 rains.append(rr or 0.0)
-                probs.append(0)
             data = {
                 "current": {"temperature_2m": t,
                              "relative_humidity_2m": inst.get("relative_humidity") or 70.0,
                              "precipitation": rains[0] if rains else 0.0,
                              "apparent_temperature": t, "time": series[0]["time"]},
-                "hourly": {"time": times, "precipitation": rains, "precipitation_probability": probs},
+                # MET compact gives no hourly probability — leave the series empty rather than fake zeros
+                "hourly": {"time": times, "precipitation": rains, "precipitation_probability": []},
                 "source": "MET Norway",
             }
         except Exception:
@@ -1990,7 +1990,7 @@ def _fragment_response():
             b1, b2 = st.columns(2)
             r_need = b1.selectbox("Need", list(rsp.NEEDS.keys()))
             r_c = b2.text_input("Contact number / name (optional)")
-            r_note = st.text_input("Location detail (sitio, street, landmark)")
+            r_note = st.text_input("Where exactly (sitio, street, landmark)")
             if st.form_submit_button("Log request", type="primary"):
                 a = _anchor(r_b)
                 sug = rsp.suggest_responder(L, a["lat"], a["lon"], r_need, W_r, r_u) if a else None
@@ -2011,7 +2011,7 @@ def _fragment_response():
                                "contact": st.column_config.TextColumn("Contact"),
                                "location_note": st.column_config.TextColumn("Where exactly"),
                                "status": st.column_config.SelectboxColumn("Status", options=rsp.STATUSES),
-                               "assigned_to": st.column_config.TextColumn("Unit"),
+                               "assigned_to": st.column_config.TextColumn("Assigned unit"),
                                # bookkeeping stays in the CSV (debrief + scoring read these)
                                "id": None, "logged_at": None, "source": None, "drill": None, "received_at": None,
                                "assigned_at": None, "resolved_at": None, "updated_at": None})
@@ -2031,10 +2031,16 @@ def _fragment_response():
             with d1:
                 st.markdown("**Dispatch**")
                 _open = reqs[reqs["status"] != "resolved"].copy()
-                _open["_o"] = (_open["status"] != "new").astype(int) * 10 + _open["urgency"].map(
-                    {"critical": 0, "high": 1, "normal": 2}).fillna(3)
-                open_ids = _open.sort_values(["_o", "logged_at"])["id"].tolist() or reqs["id"].tolist()
-                pick = st.selectbox("Request (unassigned & critical first)", open_ids, key="disp_pick",
+                # unassigned (new) first, then by urgency; already-serving requests last so the queue
+                # keeps visible context without ever putting a resolved job back in the picker
+                _urg = _open["urgency"].map({"critical": 0, "high": 1, "normal": 2}).fillna(3)
+                _open["_o"] = (_open["status"] != "new").astype(int) * 10 + _urg
+                open_ids = _open.sort_values(["_o", "logged_at"])["id"].tolist()
+            if not open_ids:
+                open_ids = reqs[reqs["status"] != "resolved"]["id"].tolist() or [
+                    r["id"] for _, r in reqs.iterrows() if not (r.get("assigned_at") or r.get("resolved_at"))]
+            if open_ids:
+                pick = st.selectbox("Request to dispatch (unassigned · critical first)", open_ids, key="disp_pick",
                                     format_func=lambda r: f"{r} · " + " · ".join(
                                         reqs[reqs["id"] == r][["status", "urgency", "barangay"]].iloc[0].astype(str)))
                 rq = reqs[reqs["id"] == pick].iloc[0].to_dict()
@@ -2050,53 +2056,56 @@ def _fragment_response():
                 msg = rsp.dispatch_message(rq, sug, PREFS.get("lang", "English"))
                 st.code(msg, language=None)
             with d2:
-                avail = res[res["status"] == "available"] if len(res) else res
-                st.markdown("**Assign a unit**")
-                if len(avail):
-                    feasible, blocked = avail, []
-                    if ex_state.get("running"):
-                        _h = exercise.sim_hour(ex_state)
-                        _W = exercise.water_at(L, ex_state["story"], _h)
-                        _a = _anchor(rq["barangay"])
-                        ok_rows = []
-                        for _, _u in avail.iterrows():
-                            ok, reason = exercise.can_serve(L, _u["type"], rq["barangay"], _W)
-                            (ok_rows if ok else blocked).append(_u if ok else (_u, reason))
-                        if ok_rows:
-                            feasible = pd.DataFrame(ok_rows)
-                        if blocked:
-                            st.caption("Ineligible at this water level "
-                                       + (f"(+{_W:.2f} m): " if _W > 0 else "(dry streets): ")
-                                       + "; ".join(f"{u['unit_id']} ({u['type']}) — {why.split(' — ')[-1]}"
-                                                   for u, why in blocked))
-                    if len(feasible):
-                        unit = st.selectbox("Available unit", feasible["unit_id"].tolist(), key="assign_unit",
-                                            format_func=lambda u: f"{u} · " + " · ".join(
-                                                feasible[feasible["unit_id"] == u][["type", "name", "location"]].iloc[0].astype(str)))
-                        if st.button("Assign to " + pick, key="assign_btn", use_container_width=True):
-                            if ex_state.get("running"):
-                                ok, det = exercise.assign(L, ex_state, unit, pick)
-                            else:
-                                ops.assign_resource(unit, pick)
-                                df = rsp.load_requests()
-                                new = df.copy()
-                                new.loc[new["id"] == pick, ["status", "assigned_to"]] = ["assigned", unit]
-                                rsp.save_requests(rsp.stamp_status_changes(new, df))
-                                ok, det = True, f"{unit} assigned to {pick}"
-                            if ok:
-                                st.session_state.pop("disp_pick", None)   # move on to the next waiting request
-                            st.toast(det)
-                            st.rerun()
-                    else:
-                        st.caption("No eligible unit at this water level — send a boat, or wait for the water to drop.")
+                if not open_ids:
+                    st.caption("Nothing to dispatch: the queue is empty or fully resolved. "
+                               "Log a request above, or 🎲 simulate incoming help texts.")
                 else:
-                    st.caption("No units marked available — register boats/trucks in 🚤 Resources.")
-                st.markdown("**Simulate dispatch message**")
-                orgs = rsp.load_directory()["organisation"].tolist()
-                to = st.selectbox("To (simulated)", orgs, key="disp_to")
-                if st.button("📤 Simulate send", key="disp_send", use_container_width=True):
-                    sms.simulate_send(to, msg, purpose=f"dispatch:{pick}")
-                    st.toast("Logged as simulated — nothing was sent")
+                    avail = res[res["status"] == "available"] if len(res) else res
+                    st.markdown("**Assign a unit**")
+                    if len(avail):
+                        feasible, blocked = avail, []
+                        if ex_state.get("running"):
+                            _h = exercise.sim_hour(ex_state)
+                            _W = exercise.water_at(L, ex_state["story"], _h)
+                            ok_rows = []
+                            for _, _u in avail.iterrows():
+                                ok, reason = exercise.can_serve(L, _u["type"], rq["barangay"], _W)
+                                (ok_rows if ok else blocked).append(_u if ok else (_u, reason))
+                            if ok_rows:
+                                feasible = pd.DataFrame(ok_rows)
+                            if blocked:
+                                st.caption("Ineligible at this water level "
+                                           + (f"(+{_W:.2f} m): " if _W > 0 else "(dry streets): ")
+                                           + "; ".join(f"{u['unit_id']} ({u['type']}) — {why.split(' — ')[-1]}"
+                                                       for u, why in blocked))
+                        if len(feasible):
+                            unit = st.selectbox("Available unit", feasible["unit_id"].tolist(), key="assign_unit",
+                                                format_func=lambda u: f"{u} · " + " · ".join(
+                                                    feasible[feasible["unit_id"] == u][["type", "name", "location"]].iloc[0].astype(str)))
+                            if st.button("Assign to " + pick, key="assign_btn", use_container_width=True):
+                                if ex_state.get("running"):
+                                    ok, det = exercise.assign(L, ex_state, unit, pick)
+                                else:
+                                    ops.assign_resource(unit, pick)
+                                    df = rsp.load_requests()
+                                    new = df.copy()
+                                    new.loc[new["id"] == pick, ["status", "assigned_to"]] = ["assigned", unit]
+                                    rsp.save_requests(rsp.stamp_status_changes(new, df))
+                                    ok, det = True, f"{unit} assigned to {pick}"
+                                if ok:
+                                    st.session_state.pop("disp_pick", None)   # move on to the next waiting request
+                                st.toast(det)
+                                st.rerun()
+                        else:
+                            st.caption("No eligible unit at this water level — send a boat, or wait for the water to drop.")
+                    else:
+                        st.caption("No units marked available — register boats/trucks in 🚤 Resources.")
+                    st.markdown("**Simulate dispatch message**")
+                    orgs = rsp.load_directory()["organisation"].tolist()
+                    to = st.selectbox("To (simulated)", orgs, key="disp_to")
+                    if st.button("📤 Simulate send", key="disp_send", use_container_width=True):
+                        sms.simulate_send(to, msg, purpose=f"dispatch:{pick}")
+                        st.toast("Logged as simulated — nothing was sent")
 
             miss = (ex_state.get("missions") or {})
             if miss:
@@ -2157,7 +2166,7 @@ def _fragment_response():
     with tabs[1]:
         i1, i2 = st.columns([1.3, 1])
         with i1:
-            st.markdown("**Simulated inbox** — texts like `HELP PANTAL 5 BOAT` or `SAKLOLO Carael 3 gamot` become requests")
+            st.markdown("**Simulated inbox** — texts like `HELP PANTAL 6 BOAT` or `SAKLOLO Carael 3 gamot` become requests")
             inbox = sms.load_log(sms.INBOX)
             pending = inbox[inbox["handled"].astype(str) != "True"] if len(inbox) else inbox
             for _, m in pending.head(12).iterrows():
@@ -2170,8 +2179,10 @@ def _fragment_response():
                     cc1.button("➕ Create request", key=f"mk_{m['msg_id']}", on_click=_inbox_to_request,
                                args=(m["msg_id"], m["sender"], m["body"], True), disabled=not (parsed and parsed["barangay"]))
                     cc2.button("✓ Dismiss", key=f"hd_{m['msg_id']}", on_click=sms.mark_handled, args=(m["msg_id"],))
+            if len(pending) > 12:
+                st.caption(f"Showing the 12 oldest of {len(pending)} pending — handle or dismiss the rest as you go.")
             if not len(pending):
-                st.caption("Inbox empty — use 🎲 above or the test box below.")
+                st.caption("Inbox empty — use 🎲 above, or the 'Write your own simulated text' box below.")
             with st.expander("Write your own simulated text"):
                 t_from = st.text_input("From", "Simulated resident", key="sim_from")
                 t_body = st.text_input("Message", "HELP PANTAL 6 BOAT nasa bubong", key="sim_body")
@@ -2195,7 +2206,7 @@ def _fragment_response():
                 n = sms.simulate_broadcast(bc_b, body)
                 sms.simulate_send(", ".join(bc_b), body, purpose="alert (area)")
                 st.toast(f"Logged as simulated for {', '.join(bc_b)} ({n} practice contacts) — nothing sent")
-        with st.expander("📤 Simulated message log"):
+        with st.expander("📜 Simulated message log"):
             ob = sms.load_log(sms.OUTBOX)
             if len(ob):
                 st.dataframe(ob.head(50), hide_index=True, use_container_width=True)
@@ -2230,7 +2241,7 @@ def _fragment_response():
         s2.metric("Full", int((sh["status"] == "full").sum()))
         s3.metric("Evacuees sheltered", f"{int(pd.to_numeric(sh['headcount'], errors='coerce').fillna(0).sum()):,}")
         s4.metric("Capacity known", f"{int(pd.to_numeric(sh['capacity'], errors='coerce').notna().sum())} / {len(sh)}")
-        s5.metric("Aboard boats now", f"{hauling}" if hauling else "0", "en route to shelters" if hauling else "no missions airborne")
+        s5.metric("Aboard boats now", f"{hauling}" if hauling else "0", "en route to shelters" if hauling else "no boats en route")
         show_only = st.checkbox("Show open / full only", value=False, key="sh_only")
         view = sh[sh["status"].isin(["open", "full"])] if show_only else sh
         with st.expander("⚡ Quick practice opener"):
@@ -2238,7 +2249,7 @@ def _fragment_response():
             qp_b = cc0.selectbox("Near barangay", sorted(L.brgy["barangay"].tolist()), index=0, key="sh_qp_b")
             n_op = cc1.number_input("Open nearest", 1, 20, 3, key="sh_qp_n")
             cap_q = cc2.number_input("capacity", 0, 5000, 120, key="sh_qp_cap")
-            if cc3.button("🎲 Open them (practice only)", use_container_width=True,
+            if cc3.button("🏫 Open them (practice only)", use_container_width=True,
                           help="Sets status=open with a round practice capacity for the centres nearest the chosen "
                                "barangay. Real capacities come from the CDRRMO list — blank them before any "
                                "real-world use."):
@@ -2353,11 +2364,13 @@ def _fragment_response():
                     fm = folium.Map(location=(a["lat"], a["lon"]), zoom_start=14, tiles=None)
                     folium.TileLayer(tiles=mapfilm.ESRI_SAT[0], attr=mapfilm.ESRI_SAT[1], name="satellite").add_to(fm)
                     folium.TileLayer(tiles=kit.ESRI_GRAY[0], attr=kit.ESRI_GRAY[1], name="map").add_to(fm)
-                    png, _ = kit.depth_png(L.depth_grid(W_r)[0], L=L)
-                    bb = kit.grid_bounds_4326(L)
-                    folium.raster_layers.ImageOverlay(image="data:image/png;base64," + _b.b64encode(png).decode(),
-                                                      bounds=[[bb[1], bb[0]], [bb[3], bb[2]]], opacity=0.55,
-                                                      name="flood depth").add_to(fm)
+                    if W_r > 0:
+                        png, _ = kit.depth_png(L.depth_grid(W_r)[0], L=L)
+                        bb = kit.grid_bounds_4326(L)
+                        folium.raster_layers.ImageOverlay(
+                            image="data:image/png;base64," + _b.b64encode(png).decode(),
+                            bounds=[[bb[1], bb[0]], [bb[3], bb[2]]], opacity=0.55,
+                            name=f"flood depth (+{W_r:.2f} m)").add_to(fm)
                     folium.Marker([a["lat"], a["lon"]], tooltip=f"{nb} (community)",
                                   icon=folium.Icon(color="orange", icon="home", prefix="fa")).add_to(fm)
                     for _, r in near.iterrows():
@@ -2390,10 +2403,12 @@ def _fragment_response():
         if st.button("💾 Save directory", key="save_dir"):
             rsp.save_directory(ded)
             st.toast("Directory saved")
+            st.rerun()
         quick = dirdf[(dirdf["mobile"].str.len() > 0) | (dirdf["landline_075"].str.len() > 0)]
-        st.markdown("**Published emergency numbers** " + " · ".join(
-            f"{r['organisation']}: **{r['mobile'] or r['landline_075']}**"
-            for _, r in quick.head(12).iterrows()))
+        if len(quick):
+            st.markdown("**Published emergency numbers** " + " · ".join(
+                f"{r['organisation']}: **{r['mobile'] or r['landline_075']}**"
+                for _, r in quick.head(12).iterrows()))
 
 
 # ================================================================= METHODS

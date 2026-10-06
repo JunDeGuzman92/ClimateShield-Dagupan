@@ -21,4 +21,7 @@ affine>=2.4
 networkx>=3.2
 qrcode[pil]>=7.4
 
+# --- tests (run_tests.bat / python -m pytest) ---
+pytest>=8.0
+
 
