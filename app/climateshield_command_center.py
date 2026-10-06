@@ -1343,8 +1343,64 @@ def _fragment_tel():
                 st.caption("Hourly totals from Open-Meteo (ECMWF/GFS blend), observed + 7-day forecast. Not a radar: "
                             "for live radar use PAGASA's official site. Official rainfall warnings: PAGASA Heavy "
                             "Rainfall Warning System.")
-            else:
-                st.info("No hourly rain data available right now.")
+
+        st.markdown("#### Heat index through the day")
+        hourly = (live or {}).get("hourly") or {}
+        if "temperature_2m" in hourly and len(hourly.get("temperature_2m") or []):
+            hh = pd.DataFrame({"time": pd.to_datetime(hourly["time"]),
+                               "t": hourly["temperature_2m"], "rh": hourly["relative_humidity_2m"]})
+            hh["HI"] = [dc.hi_c(t, r) for t, r in zip(hh["t"], hh["rh"])]
+            now_h = pd.Timestamp.now().floor("h")
+            hh = hh[(hh["time"] >= now_h.floor("D")) & (hh["time"] <= now_h.floor("D") + pd.Timedelta(hours=36))]
+            figh = go.Figure()
+            for y0, y1, colr, lab in [(20, 27, "#f1f5f9", "No caution"), (27, 33, "#fef9c3", "Caution"),
+                                       (33, 42, "#fed7aa", "Extreme caution"), (42, 52, "#fecaca", "DANGER"),
+                                       (52, 60, "#fda4af", "Extreme danger")]:
+                figh.add_hrect(y0=y0, y1=y1, fillcolor=colr, opacity=0.55, line_width=0,
+                               annotation_text=lab, annotation_position="left", annotation_font_size=9)
+            figh.add_trace(go.Scatter(x=hh["time"], y=hh["HI"], mode="lines", name="heat index",
+                                      line=dict(color="#dc2626", width=3),
+                                      customdata=hh["rh"], hovertemplate="%{x|%H:%M} · HI %{y:.0f}°C · RH %{customdata:.0f}%<extra></extra>"))
+            figh.add_trace(go.Scatter(x=[now_h], y=[HI], mode="markers", name="now",
+                                      marker=dict(size=13, color="#dc2626", line=dict(width=2, color="white")),
+                                      hovertemplate="now · %{y:.0f}°C<extra></extra>"))
+            figh.update_layout(height=280, margin=dict(l=8, r=8, t=8, b=8), showlegend=False,
+                               yaxis=dict(title="heat index °C", range=[22, 58], gridcolor=PLOT_GRID),
+                               xaxis=dict(gridcolor=PLOT_GRID))
+            st.plotly_chart(plotly_beige(figh, height=280), use_container_width=True, config={"displayModeBar": False})
+            mid = hh.iloc[(hh["time"] - now_h).abs().argsort()[:1]].iloc[0]
+            peak_hi = float(hh["HI"].max())
+            st.caption(f"Today's modelled curve for the city centre: currently {mid['HI']:.0f}°C, peaking near "
+                       f"**{peak_hi:.0f}°C**. Bands are PAGASA heat-index categories.")
+        else:
+            st.caption("Hourly temperature/humidity not available from the current feed (MET Norway fallback "
+                       "provides rain only).")
+
+        with st.expander("❓ What is this number, on what grounds — and what is it for?"):
+            st.markdown(
+                f"""
+                **What you are looking at:** an automated *estimate* of conditions at one grid point (16.04°N, 120.33°E —
+                the city centre), refreshed continuously from the Open-Meteo service, which blends European/global
+                weather models at roughly 11 km resolution. It is **not** a thermometer in Dagupan.
+
+                **Why it can differ from radio/TV/PAGASA:** PAGASA's Dagupan station measures real air at its
+                enclosure; models smooth over the whole grid cell. Heat index computed from model temperature and
+                humidity typically lands within a few °C of the station value but can diverge on humid, still nights
+                or during passing showers. The current source: **{(live or {}).get('source', '—')}**
+                (fetched {(cur or {}).get('fetched_at', '—')}).
+
+                **So what is it for?** Triage, not pronouncement. A live-on-24/7 estimate lets the city:
+                1. **Time the day** — the curve above shows *when* heat index crosses PAGASA's caution/danger bands,
+                   so class suspensions, outdoor-work windows and respite-point openings can be planned hours ahead;
+                2. **Trigger sims & drills** — heat scenarios and the Walkthrough action card switch on live readings;
+                3. **Hold the question** — 'is it dangerously hot right now?' deserves an answer at 3 a.m. too, which
+                   no manual feed gives.
+
+                **What it is not:** an official warning. Heat-index warnings come from PAGASA Dagupan; river flooding
+                comes from the CDRRMO/PDRRMO gauge network — and as the PhilSensors panel below shows, the nearest
+                public river stations are not reporting. When a live station or gauge feed is integrated, this page
+                switches to showing both, side by side, with each labeled.
+                """)
 
     st.subheader("📟 Official sensor network — DOST-ASTI PhilSensors (Pangasinan)")
     with st.spinner("Checking PhilSensors (cached 30 min)…"):
@@ -1575,12 +1631,14 @@ def _fragment_wlk():
                 fprof.add_scatter(x=[0], y=[float(row["elev_m"])],
                                   mode="markers", name="core", marker=dict(size=12, color="#f59e0b", symbol="star"),
                                   hovertemplate="your core<extra></extra>")
-                fprof.update_layout(height=300, margin=dict(l=8, r=8, t=30, b=8),
+                fprof.update_layout(height=320,
                                     xaxis=dict(title="metres east (−) of the core (+)", gridcolor=PLOT_GRID),
-                                    yaxis=dict(title="m above sea", gridcolor=PLOT_GRID),
-                                    legend=dict(orientation="h", y=1.22, font=dict(size=10)))
-                st.plotly_chart(plotly_beige(fprof, height=300, title="Ground profile · 2.6 km through the core"),
-                                use_container_width=True, config={"displayModeBar": False})
+                                    yaxis=dict(title="m above sea", gridcolor=PLOT_GRID))
+                fprof = plotly_beige(fprof, height=320, title="Ground profile · 2.6 km through the core")
+                fprof.update_layout(margin=dict(l=8, r=8, t=34, b=66),
+                                    legend=dict(orientation="h", y=-0.44, x=0, font=dict(size=10),
+                                                bgcolor="rgba(0,0,0,0)"))
+                st.plotly_chart(fprof, use_container_width=True, config={"displayModeBar": False})
                 st.markdown(mapfilm.depth_gauge_html(d_core, kit.depth_label(d_core) + " at the core"),
                             unsafe_allow_html=True)
                 st.caption("The blue wedge between the ground line and the water line is how deep a calamity flood "
@@ -1777,6 +1835,19 @@ def _fragment_exercise():
                 st.markdown(f"**Last run — {state.get('team')}** · {state['story']['title']} "
                             f"· stopped at storm hour {state.get('final_hour', 0):.0f}")
                 _score_card(state["final_score"])
+                try:
+                    fig, png = exercise.debrief_figure(L, state)
+                    st.pyplot(fig)
+                    plt.close(fig)
+                    st.download_button("⬇ Download this debrief (PNG)", data=png,
+                                        file_name=f"debrief_{state.get('team', 'team').replace(' ', '_')}.png",
+                                        mime="image/png", use_container_width=True)
+                    st.caption("Debrief reading: the blue curve is the storm; ▽ marks each text you turned into a "
+                               "request, ● a unit assignment, ★ everyone delivered. Dotted red lines are the "
+                               "complications as they hit — the distance between a line and the next ● is your "
+                               "reaction time.")
+                except Exception as e:
+                    st.info(f"Debrief chart unavailable ({type(e).__name__}).")
             hist = exercise.history()
             if len(hist):
                 with st.expander(f"📊 Run history ({len(hist)}) — compare teams"):
@@ -2105,10 +2176,25 @@ def _fragment_response():
                 st.caption("Nothing logged yet.")
 
     with tabs[2]:
-        st.markdown("**Evacuation centre board** — seeded from OpenStreetMap (schools, halls, shelters inside Dagupan). "
-                    "Capacities start blank on purpose: enter the CDRRMO's official figures. During a timed exercise, "
-                    "each successful boat delivery automatically lands evacuees here, and centres mark FULL on arrival "
-                    "when the headcount passes capacity.")
+        st.markdown("**Evacuation centre board.** Every centre starts **CLOSED** on purpose — a school being a school "
+                    "is not a shelter until the city opens it. Keeping one open is a status you set and the board "
+                    "keeps:")
+        with st.expander("📖 How this board works — opening, filling, closing", expanded=False):
+            st.markdown(
+                """
+                1. **To open a centre:** click its **Status** cell in the table and choose `open`
+                   (or use the quick-opener below for a whole practice set in one click).
+                2. **Capacity:** type the CDRRMO's official figure into *capacity* (blank = unknown — the board will
+                   never mark an unknown-capacity centre full).
+                3. **In a timed exercise:** every successful boat delivery lands its passengers automatically at the
+                   nearest OPEN centre with space — *headcount* rises by itself and you watch the board fill.
+                4. **Full:** a centre auto-marks `full` the moment headcount reaches capacity; the next delivery is
+                   routed to the next centre. You can also set it by hand.
+                5. **Unsafe:** the *evacuation centre loses power* complication will mark an open centre `unsafe` —
+                   deliveries stop going there until you reopen it.
+                6. **Closed again:** after the exercise, reset with 🧹 Reset simulation at the top of the page
+                   (all headcounts clear; statuses stay as you left them).
+                """)
         sh = ops.load_shelters(L)
         occ = ops.occupancy(sh)
         hauling = sum(m.get("load") or 0 for m in (ex_state.get("missions") or {}).values() if m["phase"] == "back")
@@ -2120,21 +2206,25 @@ def _fragment_response():
         s5.metric("Aboard boats now", f"{hauling}" if hauling else "0", "en route to shelters" if hauling else "no missions airborne")
         show_only = st.checkbox("Show open / full only", value=False, key="sh_only")
         view = sh[sh["status"].isin(["open", "full"])] if show_only else sh
-        with st.expander("📖 Quick practice setup", expanded=False):
-            cc1, cc2, cc3 = st.columns([1, 1, 2])
-            n_op = cc1.number_input("Open the nearest N centres to Pantal", 1, 20, 3, key="sh_qp_n")
-            cap_q = cc2.number_input("with practice capacity", 0, 5000, 120, key="sh_qp_cap")
-            if cc3.button(f"🎲 Open {n_op} centres (practice only)", use_container_width=True,
-                          help="Sets status=open and a round practice capacity for the centres nearest to Pantal. "
-                               "Real capacities come from the CDRRMO list."):
+        with st.expander("⚡ Quick practice opener"):
+            cc0, cc1, cc2 = st.columns([1.3, 0.7, 1])
+            qp_b = cc0.selectbox("Near barangay", sorted(L.brgy["barangay"].tolist()), index=0, key="sh_qp_b")
+            n_op = cc1.number_input("Open nearest", 1, 20, 3, key="sh_qp_n")
+            if cc2.button("🎲 Open them (practice only)", use_container_width=True,
+                          help="Sets status=open with a round practice capacity for the centres nearest the chosen "
+                               "barangay. Real capacities come from the CDRRMO list — blank them before any "
+                               "real-world use."):
                 full = ops.load_shelters(L)
-                a = next(b["anchor"] for b in L.brgy_anchors if b["barangay"] == "Pantal")
-                d = (full["lat"].astype(float) - a["lat"]) ** 2 + ((full["lon"].astype(float) - a["lon"]) * 0.96) ** 2
-                full.loc[d.nsmallest(int(n_op)).index, "status"] = "open"
-                full.loc[d.nsmallest(int(n_op)).index, "capacity"] = str(int(cap_q))
-                ops.save_shelters(full)
-                st.toast(f"{int(n_op)} centres opened with capacity {int(cap_q)}")
-                st.rerun()
+                a = _anchor(qp_b)
+                if a:
+                    d = (full["lat"].astype(float) - a["lat"]) ** 2 + ((full["lon"].astype(float) - a["lon"]) * 0.96) ** 2
+                    full.loc[d.nsmallest(int(n_op)).index, "status"] = "open"
+                    full.loc[d.nsmallest(int(n_op)).index, "capacity"] = "120"
+                    ops.save_shelters(full)
+                    st.toast(f"{int(n_op)} centres opened near {qp_b} (practice capacity 120)")
+                    st.rerun()
+                else:
+                    st.caption(f"No anchor for {qp_b} — open centres by hand in the table.")
         sed = st.data_editor(view, hide_index=True, use_container_width=True, key="sh_ed", height=360,
                              column_config={"status": st.column_config.SelectboxColumn("status", options=ops.SHELTER_STATUS),
                                             "shelter_id": st.column_config.TextColumn(disabled=True),

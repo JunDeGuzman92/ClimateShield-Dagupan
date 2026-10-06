@@ -172,7 +172,7 @@ def admit_evacuees(L, brgy, W, people, exclude_ids=()):
                 return True, f"→ {df.loc[i, 'name']} is now FULL ({new_hc}/{int(cap_i)})"
             save_shelters(df)
             return True, f"→ {df.loc[i, 'name']} ({why})"
-    return False, "no OPEN shelter — add one on the 🏠 Shelters board"
+    return False, "no OPEN shelter — open one on the 🏠 Shelters board (set its status to 'open')"
 
 
 def load_resources():

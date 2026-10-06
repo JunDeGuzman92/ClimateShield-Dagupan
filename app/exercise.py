@@ -4,6 +4,7 @@ A running exercise maps real time → storm time (speed = storm-hours per real m
 the current storm water level from here, so flood conditions worsen and recede as the exercise runs.
 Everything is local and simulated.
 """
+import io
 import json
 from datetime import datetime
 from pathlib import Path
@@ -180,6 +181,10 @@ def tick(L, state=None):
             ev["fired_at"] = datetime.now().isoformat(timespec="seconds")
             fired.append(ev)
     changed = _physics(L, state, h)
+    esc = _escalations(L, state, h)
+    if esc:
+        state["phys_notes"] = state.get("phys_notes", []) + esc
+        changed = True
     if fired or changed:
         save(state)
     return state, fired
@@ -364,6 +369,46 @@ def people_remaining(state, reqs=None):
     return total
 
 
+# ----------------------------------------------------------------------------- resident escalation
+ESCALATE_H = (6.0, 12.0)      # storm-hours of being ignored before the 1st/2nd follow-up text
+_KW_OF = {"🚤 Rescue boat / evacuation": "BANGKA", "🩹 Medical": "GAMOT", "🔥 Fire": "SUNOG",
+          "🍚 Food / water": "PAGKAIN", "🏠 Shelter space": "SHELTER", "🚓 Security": "HELP"}
+
+
+def _escalations(L, state, h):
+    """Ignored residents text again — louder. Max 2 follow-ups per message, then they give up."""
+    notes = []
+    esc = state.setdefault("escalations", {})
+    inbox = sms.load_log(sms.INBOX)
+    if not len(inbox):
+        return notes
+    started = datetime.fromisoformat(state["started_at"])
+    pend = inbox[inbox["handled"].astype(str) != "True"]
+    for _, m in pend.iterrows():
+        try:
+            msg_h = (datetime.fromisoformat(m["at"]) - started).total_seconds() / 60.0 * float(state["speed"])
+        except Exception:
+            continue
+        lag = h - msg_h
+        want = 2 if lag >= ESCALATE_H[1] else 1 if lag >= ESCALATE_H[0] else 0
+        if want <= esc.get(m["msg_id"], 0):
+            continue
+        parsed = sms.parse_request(m["body"], L.brgy["barangay"].tolist())
+        if not parsed or not parsed["barangay"]:
+            continue    # non-emergency or unparseable: leave it for manual handling
+        esc[m["msg_id"]] = want
+        kw = _KW_OF.get(parsed["need"], "BANGKA")
+        if want == 1:
+            body = f"TUMATAAS PA RIN ANG TUBIG — TULONG ULI {parsed['barangay']} {parsed['people']} {kw}"
+        else:
+            body = (f"[HINDI NA PO KAMI LIGTAS] SAKLOLO ULI {parsed['barangay']} {parsed['people']} {kw} "
+                    "MAY BATA AT MATANDA")
+        sms.simulate_inbound(m["sender"], body)
+        notes.append(f"📞 Same resident texts again — {parsed['barangay']}, {parsed['people']} "
+                     f"({'worse now' if want == 2 else 'no reply yet'})")
+    return notes
+
+
 # ----------------------------------------------------------------------------- scoring
 def _mins(a, b):
     try:
@@ -460,3 +505,80 @@ def stop(L):
 
 def history():
     return pd.read_csv(HISTORY) if HISTORY.exists() else pd.DataFrame()
+
+
+# ----------------------------------------------------------------------------- debrief (item 10)
+def debrief_figure(L, state, sc=None):
+    """One-page run timeline: water level, requests logged/assigned/resolved, complications fired.
+
+    Returns (matplotlib figure, PNG bytes) for display and download. X-axis is real minutes into the
+    run; the water curve uses the storm→real mapping so teams see how they did against the storm.
+    """
+    import matplotlib.pyplot as plt
+    started = datetime.fromisoformat(state["started_at"])
+    end = state.get("stopped_at") and datetime.fromisoformat(state["stopped_at"]) or datetime.now()
+    total_min = max((end - started).total_seconds() / 60.0, 1.0)
+    speed = float(state.get("speed", 4))
+    story = state["story"]
+
+    def mins(ts):
+        try:
+            return (pd.to_datetime(ts) - started).total_seconds() / 60.0
+        except Exception:
+            return np.nan
+
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(9, 6.2), height_ratios=[2.2, 1],
+                                  gridspec_kw=dict(hspace=0.35))
+    t = np.linspace(0, total_min, 240)
+    Ws = [water_at(L, story, tm * speed) for tm in t]
+    ax.plot(t, Ws, color="#2563eb", lw=2.2)
+    ax.fill_between(t, Ws, 0, where=np.array(Ws) > 0, color="#2563eb", alpha=0.18)
+    ax.axhline(0, color="#9ca3af", lw=0.8)
+    ax.set_ylabel("water level (m)")
+    ax.set_title(f"Run timeline — {state.get('team', 'Team')} · {story['title']}", fontsize=11, color="#1f2937")
+    reqs = rsp.load_requests()
+    if len(reqs):
+        reqs = reqs[pd.to_datetime(reqs["logged_at"], errors="coerce") >= started - pd.Timedelta(minutes=1)]
+    for _, r in reqs.iterrows():
+        x = mins(r["logged_at"])
+        ax.plot(x, 0.02, marker="v", color="#6b7280", ms=7, clip_on=False)
+        if r.get("assigned_at"):
+            ax.plot(mins(r["assigned_at"]), 0.06, marker="o", color="#f59e0b", ms=6, clip_on=False)
+        if r.get("resolved_at"):
+            ax.plot(mins(r["resolved_at"]), 0.10, marker="*", color="#16a34a", ms=11, clip_on=False)
+    fired = [e for e in state.get("events", []) if e.get("fired_at")]
+    for i, e in enumerate(fired):
+        x = mins(e["fired_at"])
+        ax.axvline(x, color="#dc2626", lw=0.8, ls=":", alpha=0.8)
+        ax.text(x, 0.985, e["id"], color="#dc2626", fontsize=7, rotation=90, va="top",
+                transform=ax.get_xaxis_transform())
+    ax.set_xlim(0, total_min)
+    ax.legend(handles=[
+        plt.Line2D([], [], color="#2563eb", lw=2, label="storm water (m)"),
+        plt.Line2D([], [], marker="v", ls="", color="#6b7280", label="text → request"),
+        plt.Line2D([], [], marker="o", ls="", color="#f59e0b", label="unit assigned"),
+        plt.Line2D([], [], marker="*", ls="", color="#16a34a", label="delivered / resolved"),
+    ], fontsize=8, loc="upper left", framealpha=0.9)
+    sc = sc or state.get("final_score") or {}
+    k = sc.get("kpis", {})
+    rows = [
+        ("Score", f"{sc.get('total', 0):.0f} / 100 (grade {sc.get('grade', '—')})"),
+        ("Text → request", f"{k.get('intake_min', np.nan):.1f} min avg" if np.isfinite(k.get("intake_min", np.nan)) else "—"),
+        ("Request → unit", f"{k.get('assign_min', np.nan):.1f} min avg" if np.isfinite(k.get("assign_min", np.nan)) else "—"),
+        ("Resolved", f"{100 * k.get('resolved_pct', 0):.0f}% (critical {100 * k.get('critical_resolved_pct', 0):.0f}%)"),
+        ("Texts ignored", f"{k.get('texts_ignored', 0)} of {k.get('texts_received', 0)}"),
+        ("Complications ack", f"{100 * k.get('events_acked_pct', 0):.0f}%"),
+        ("People still waiting", f"{k.get('people_waiting', 0):,}"),
+        ("Pitfalls", f"{k.get('shelters_overfilled', 0)} overfilled · {k.get('unsafe_shelters_occupied', 0)} unsafe occupied"),
+    ]
+    ax2.axis("off")
+    y = 0.95
+    for label, val in rows:
+        ax2.text(0.01, y, f"{label}:", fontsize=9, fontweight="bold", va="top", color="#1f2937")
+        ax2.text(0.30, y, str(val), fontsize=9, va="top", color="#374151")
+        y -= 0.125
+    ax2.text(0.01, 0.02, "ClimateShield-Dagupan exercise debrief · simulator only · "
+             f"storm hour {state.get('final_hour', 0):.0f} at ×{speed:g}", fontsize=7.5, color="#6b7280")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=140, bbox_inches="tight", facecolor="white")
+    return fig, buf.getvalue()
