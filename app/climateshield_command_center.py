@@ -1712,7 +1712,7 @@ def _fragment_wlk():
             res.append({"scenario": name.replace(" (", " · ("), "water level": f"+{We:.2f} m",
                         "residents in flood zones (est)": est})
         st.dataframe(pd.DataFrame(res), hide_index=True, use_container_width=True)
-        st.caption("Estimates scale the barangay census by the flooded fraction of its 600 m anchor window. "
+        st.caption("Estimates scale the barangay census by the flooded share of its area — polygon basis where boundary masks exist, 600 m anchor window as fallback (see basis column). "
                    "Multi-day events (Aug 2026 pattern) stress evacuation beyond day-one numbers.")
     elif step == 3:
         W_c = L.water_level_for_share(45) + 0.20

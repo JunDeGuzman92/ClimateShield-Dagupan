@@ -18,6 +18,7 @@ streamlit>=1.40
 streamlit-folium>=0.20
 plotly>=5.20
 affine>=2.4
+pillow>=10.0
 networkx>=3.2
 qrcode[pil]>=7.4
 
