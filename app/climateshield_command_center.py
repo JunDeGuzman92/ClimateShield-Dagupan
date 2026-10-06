@@ -28,6 +28,7 @@ import gauges
 import demimport
 import exercise
 import replay
+import validation
 
 ROOT = APP_DIR.parent
 CHARTS = ROOT / "outputs" / "charts"
@@ -2199,6 +2200,22 @@ def _fragment_methods():
                     | Hourly rain (past 24 h + 7-day) | Open-Meteo | CC-BY 4.0 |
                     """
             )
+        with st.expander("Model validation — Aug 2026 habagat vs CDRRMO SitRep No. 15", expanded=False):
+            st.caption(f"Observed facts from one official source: {validation.OBSERVED['source']}. The model is not "
+                       "re-tuned here — matches and misses are both reported. Read the 'reading' column before "
+                       "quoting a number from this app.")
+            vtable, vsum = validation.checks(L)
+            st.dataframe(vtable, use_container_width=True, hide_index=True,
+                         column_config={"check": st.column_config.TextColumn(width="medium"),
+                                        "model": st.column_config.TextColumn(width="small"),
+                                        "observed": st.column_config.TextColumn(width="medium"),
+                                        "reading": st.column_config.TextColumn(width="large")})
+            st.markdown(f"**Bottom line:** the peak matches the sitrep reasonably — "
+                        f"**{vsum['windows_peak']}/31** barangay windows with water vs 23 reported still-flooded, and "
+                        f"**{vsum['pop_peak']:,.0f}** residents in flood zones vs 90,015 reported affected "
+                        f"({100 * vsum['ratio']:.0f}%). The model's weakness is **persistence**: it drains faster than "
+                        "Dagupan did, so treat any 'water gone by…' estimate as optimistic until a better DEM and "
+                        "real drainage data arrive.")
         with st.expander("Calibration & honesty"):
             st.markdown(
                 f"""
