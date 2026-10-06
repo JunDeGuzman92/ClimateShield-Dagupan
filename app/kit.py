@@ -241,13 +241,74 @@ ESRI_GRAY = ("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_
              "Esri, HERE, Garmin, (c) OpenStreetMap contributors, GIS User Community")
 
 
+def brgy_layer(L, m, choro=None, highlight=None):
+    """Barangay boundary outlines (+ optional choropleth fill + one highlighted barangay).
+
+    choro: {barangay: dict(frac=float 0..1, note=str)} — polygons with a `frac` entry are shaded
+    YlOrRd and gain a tooltip with the note. highlight: barangay name to outline boldly.
+    Source of geometry: see brgypoly.py (official file when provided, else derived interim).
+    """
+    import folium
+    try:
+        import brgypoly as _bp
+        gj, path = _bp.map_layer()
+        if gj is None:
+            return
+        src = (gj.get("properties") or {}).get("source", "boundaries")
+        interim = "derived" in str(src)
+
+        def color_for(frac):
+            import math
+            if frac is None:
+                return "#6b7280"
+            f = max(0.0, min(1.0, float(frac)))
+            ramp = [(0.0, (255, 247, 237)), (0.25, (254, 204, 138)), (0.5, (253, 141, 60)),
+                    (0.75, (217, 72, 1)), (1.0, (128, 0, 38))]
+            for (a, ca), (b, cb) in zip(ramp, ramp[1:]):
+                if f <= b:
+                    t = (f - a) / (b - a) if b > a else 0
+                    rgb = tuple(int(ca[i] + (cb[i] - ca[i]) * t) for i in range(3))
+                    return f"rgb{rgb}"
+            return "rgb(128,0,38)"
+
+        def style_fn(f):
+            nm = f["properties"]["name"]
+            frac = (choro or {}).get(nm, {}).get("frac")
+            hl = highlight == nm
+            return dict(fillColor=color_for(frac), fill=(choro is not None or hl),
+                        fillOpacity=0.45 if hl else (0.38 if choro is not None else 0.0),
+                        weight=3 if hl else 1.2, color="#1e3a8a" if hl else "#ffffff", opacity=0.9)
+
+        def tt_fn(f):
+            nm = f["properties"]["name"]
+            ent = (choro or {}).get(nm)
+            base = f"<b>{nm}</b>" + (" · DERIVED boundary (interim)" if interim else "")
+            if ent:
+                base += "<br>" + ent.get("note", "")
+            return base
+
+        layer = folium.GeoJson(gj, name=f"({'DERIVED interim ' if interim else ''}barangay boundaries)",
+                               style_function=style_fn,
+                               tooltip=folium.GeoJsonTooltip(fields=["name"], aliases=["Barangay:"])
+                               if choro is None else folium.GeoJsonTooltip(
+                                   fields=["name"], aliases=["Barangay:"],
+                                   labels=False, sticky=False, style="font-size:11px;"))
+        layer.add_to(m)
+    except Exception:
+        pass
+
+
 def make_city_map(L, depth=None, focus=None, crowd=True, fac=True,
-                  center=(16.0432, 120.3342), zoom=13, W_cut=None, vmax=None, legend=True):
+                  center=(16.0432, 120.3342), zoom=13, W_cut=None, vmax=None, legend=True,
+                  boundaries=True, choro=None, highlight=None):
     import folium
     m = folium.Map(location=center, zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=ESRI_GRAY[0], attr=ESRI_GRAY[1], name="map (Esri light)").add_to(m)
     folium.TileLayer(tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
                      attr="Esri, Maxar, Earthstar", name="satellite (Esri)").add_to(m)
+
+    if boundaries:
+        brgy_layer(L, m, choro=choro, highlight=highlight)
 
     if depth is not None:
         png, v = depth_png(depth, vmax=vmax, L=L)
@@ -651,24 +712,46 @@ def gauge_freshness(path=GAUGE, stale_after_h=24):
             "label": hist.iloc[-1]["logged_at"].strftime("%b %d %H:%M") if hasattr(hist.iloc[-1]["logged_at"], "strftime") else str(hist.iloc[-1]["logged_at"])}
 
 
+def parse_gauge_text(text):
+    """Tolerant parser for agency gauge CSV (see docs/future_real_operations/GAUGE_FEED_SPEC.md).
+
+    Accepts logged_at|timestamp|time and level_m|level|stage_m (+ note, station), plus optional
+    official thresholds alert_m/alarm_m/critical_m carried on any row. Returns
+    (DataFrame[logged_at, level_m, note], thresholds|None, error_message|None).
+    """
+    import io as _io
+    df = pd.read_csv(_io.StringIO(str(text)))
+    cols = {str(c).lower().strip(): c for c in df.columns}
+    tcol = cols.get("logged_at") or cols.get("timestamp") or cols.get("time") or cols.get("date")
+    lcol = cols.get("level_m") or cols.get("level") or cols.get("stage_m")
+    ncol = cols.get("note") or cols.get("source") or cols.get("remark")
+    if not (tcol and lcol):
+        return None, None, "feed needs columns logged_at, level_m (, note) — see GAUGE_FEED_SPEC.md"
+    out = pd.DataFrame({"logged_at": pd.to_datetime(df[tcol], errors="coerce"),
+                        "level_m": pd.to_numeric(df[lcol], errors="coerce"),
+                        "note": (df[ncol].astype(str) if ncol else "feed")})
+    out = out.dropna(subset=["logged_at", "level_m"]).sort_values("logged_at")
+    thresholds = None
+    tac = cols.get("alert_m"), cols.get("alarm_m"), cols.get("critical_m")
+    if all(tac):
+        vals = [pd.to_numeric(df[c], errors="coerce").dropna() for c in tac]
+        if all(len(v) for v in vals) and all(bool((v > 0).all()) for v in vals):
+            thresholds = dict(alert=float(vals[0].iloc[-1]), alarm=float(vals[1].iloc[-1]),
+                              critical=float(vals[2].iloc[-1]))
+    if not len(out):
+        return None, thresholds, "no parseable rows (need a date column and numeric levels)"
+    return out, thresholds, None
+
+
 def read_sheet_csv(url, timeout=15):
     import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "ClimateShieldDagupan/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         text = r.read().decode("utf-8-sig")
-    import io as _io
-    df = pd.read_csv(_io.StringIO(text))
-    cols = {c.lower().strip(): c for c in df.columns}
-    tcol = cols.get("logged_at") or cols.get("timestamp") or cols.get("time")
-    lcol = cols.get("level_m") or cols.get("level") or cols.get("stage_m")
-    ncol = cols.get("note") or cols.get("source")
-    if not (tcol and lcol):
-        return None, "sheet needs columns logged_at, level_m (, note)"
-    out = pd.DataFrame({"logged_at": pd.to_datetime(df[tcol], errors="coerce"),
-                        "level_m": pd.to_numeric(df[lcol], errors="coerce"),
-                        "note": df[ncol].astype(str) if ncol else "sheet"})
-    out = out.dropna(subset=["logged_at", "level_m"]).sort_values("logged_at")
-    return out, None
+    df, thresholds, msg = parse_gauge_text(text)
+    if df is not None and thresholds:
+        df.attrs["thresholds"] = thresholds
+    return df, msg
 
 
 def pagasa_hook_probe(timeout=12):

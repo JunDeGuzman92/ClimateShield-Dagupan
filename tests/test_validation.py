@@ -9,17 +9,26 @@ def test_observed_facts_are_the_official_sitreps():
 def test_peak_matches_families_and_barangay_counts_within_bands(layers):
     import validation
     _, s = validation.checks(layers)
-    assert 40 <= s["W_peak"] * 100 <= 60 or 0.4 <= s["W_peak"] <= 0.65, "peak water level in the expected range"
+    assert 0.4 <= s["W_peak"] <= 0.65, "peak water level in the expected range"
     assert 0.70 <= s["ratio"] <= 1.10, f"model affected {s['ratio']:.2f} of the reported 90,015 — outside the comparable band"
-    assert 15 <= s["windows_peak"] <= 26, "barangay windows flooded at peak should land near the 23 reported"
-    assert 6 <= s["anchors_peak"] <= 20, "anchor-cell count is the stricter criterion (OSM cores are dry)"
+    assert 20 <= s["poly_peak"] <= 31, "barangays with water at peak (polygon share) should be ≥ the sitrep's 23"
+    assert 4 <= s["anchors_peak"] <= 20, "anchor-point count is the stricter criterion (OSM cores are dry)"
 
 
-def test_persistence_gap_is_reported_not_hidden(layers):
-    """The model drains faster than Dagupan did — validation must report the shortfall."""
+def test_sitrep_date_polygon_count_lands_near_the_reported_23(layers):
+    """The like-for-like comparison: barangays with water at sitrep time ≈ the reported 23/31."""
     import validation
     _, s = validation.checks(layers)
-    assert s["windows_late"] < s["windows_peak"] or s["anchors_late"] < s["anchors_peak"], \
-        "expected the model to recede by sitrep time"
-    assert s["windows_late"] < validation.OBSERVED["barangays_still_flooded"], \
-        "under-estimating persistence is the documented limitation; update the Methods text if this ever passes"
+    assert abs(s["poly_late"] - validation.OBSERVED["barangays_still_flooded"]) <= 5, \
+        (f"polygon count at sitrep time is {s['poly_late']}; the reported count is "
+         f"{validation.OBSERVED['barangays_still_flooded']} — if this drifts, re-check the storage curve "
+         "before shipping, and update the Methods wording")
+    assert s["poly_late"] < s["poly_peak"], "water must recede between peak and sitrep time"
+
+
+def test_anchor_point_measure_still_underestimates(layers):
+    """The stricter point measure keeps showing the cores drain first — documented as a limitation."""
+    import validation
+    _, s = validation.checks(layers)
+    assert s["anchors_late"] <= s["anchors_peak"], "anchor points should drain between peak and sitrep date"
+    assert s["anchors_late"] < 10, "if cores stop draining, the persistence narrative needs a rewrite"

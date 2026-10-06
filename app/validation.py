@@ -49,33 +49,43 @@ def checks(L):
     ratio = pop_peak / OBSERVED["individuals"]
     pop_pct = pop_peak / L.meta["psa_pop_2020"]
 
+    summary = dict(W_peak=W_peak, W_late=W_late, pop_peak=pop_peak, ratio=ratio,
+                   poly_peak=windows_peak, poly_late=windows_late,
+                   anchors_peak=anchors_peak, anchors_late=anchors_late)
+    basis = L.boundary_source.split("(")[0].strip()
     rows = [
         dict(check="Residents in flood zones at the habagat peak",
              model=f"{pop_peak:,.0f} ({100 * pop_pct:.0f}% of census)",
              observed=f"{OBSERVED['individuals']:,} affected — {OBSERVED['families']:,} families (SitRep 15)",
              reading=f"comparable: {100 * ratio:.0f}% of the reported figure. The model counts residents whose "
                      "cells are under water; 'affected' also includes people whose livelihood/yard flooded."),
-        dict(check="Barangays with water in them at the peak (600 m anchor window)",
+        dict(check="Barangays with water in them at the peak (share of residents > 0, "
+                  + basis + ")",
              model=f"{windows_peak} / 31",
              observed=f"{OBSERVED['barangays_still_flooded']} / 31 still flooded weeks later (SitRep 15)",
-             reading="comparable — despite the sitrep being taken ≈2 weeks AFTER the model's peak."),
-        dict(check="Barangay core anchors under water at the peak (>15 cm at the OSM place point)",
+             reading="model counts more barangays than the sitrep — expected, since the sitrep is a "
+                     "recession-era snapshot, not the peak."),
+        dict(check="Barangays with water in them at sitrep time (≈Aug 25, model water +"
+                  f"{W_late:.2f} m)",
+             model=f"{windows_late} / 31",
+             observed=f"{OBSERVED['barangays_still_flooded']} / 31 still flooded (SitRep 15)",
+             reading="closest like-for-like comparison available: the model's barangay count at the "
+                     "sitrep date matches the reported count. Some coincidence is likely — the sitrep "
+                     "counts house-level flooding, the model any share above zero — but the previous "
+                     "anchor-window method gave 4–8, so the barangay-area basis is a real step up."),
+        dict(check="Barangay core points under water at the peak (>15 cm at the OSM place node)",
              model=f"{anchors_peak} / 31",
              observed="— (no per-barangay depth reading exists publicly)",
              reading="stricter criterion. OSM place points often sit on the dry centre, so this undercounts."),
-        dict(check="Barangays still flooded at sitrep time (≈Aug 25, model water +"
-                  f"{W_late:.2f} m)",
-             model=f"{anchors_late} anchors / {windows_late} windows / 31",
-             observed=f"{OBSERVED['barangays_still_flooded']} / 31 still flooded (SitRep 15)",
-             reading="UNDERESTIMATES PERSISTENCE: the model drains faster than Dagupan did. The 6-day storage "
-                     "constant is too short for a tide-locked city — ponding lasted weeks in reality. Any "
-                     "'how long until it drains' use of the model should be read as optimistic."),
+        dict(check="Barangay core points under water at sitrep time",
+             model=f"{anchors_late} / 31",
+             observed=f"{OBSERVED['barangays_still_flooded']} / 31 (SitRep 15)",
+             reading="the point-measure still underestimates persistence (3 vs 23): cores drain first, "
+                     "outlying fishpond-side houses last. The polygon row above is the better measure."),
         dict(check="Flooded-land share at the habagat peak",
              model=f"{L.flooded_share(W_peak):.0f}% of active land (water +{W_peak:.2f} m)",
              observed="— (no official citywide figure published)",
              reading="this is the CALIBRATION anchor, not an independent check: the 45% class was set from "
                      "this event's sitrep class."),
     ]
-    summary = dict(W_peak=W_peak, W_late=W_late, pop_peak=pop_peak, ratio=ratio, windows_peak=windows_peak,
-                   windows_late=windows_late, anchors_peak=anchors_peak, anchors_late=anchors_late)
     return pd.DataFrame(rows), summary

@@ -15,7 +15,7 @@ The analytical engine is a single fully-executed notebook, `ClimateShield_Dagupa
 | 3 | **Heavy & intense rain days are significantly increasing** (D50: +0.15 d/yr, p=0.001; D100: +0.04 d/yr, p=0.027; Kendall tau) | NASA POWER 1981–2026, cross-checked vs ERA5 (r≈0.69–0.77) |
 | 4 | **Danger-level heat-index days rising**: ~107/yr (1981–1990) → ~135/yr (2017–2026), tau p<0.02; station records crest at **51°C** | Rothfusz HI on NASA POWER; PAGASA station anchors; ERA5 apparent-T cross-check |
 | 5 | Ready-made early-warning triggers aligned to **official PAGASA categories** (flood Monitoring/Alert/Warning/Severe; heat-index Caution→Extreme Danger) with community playbooks that work with or without government aid | PAGASA official classifications |
-| 6 | **Barangay risk watchlist** (Pantal, Pogo Chico, Mayombo, Bolosan, Lucao, …) with transparent CSRI scoring; all 31 barangays spatially anchored | PSA census × OSM anchors × susceptibility rasters |
+| 6 | **Barangay risk watchlist** (Pantal, Pogo Chico, Mayombo, Bolosan, Lucao, …) with transparent CSRI scoring; 30/31 barangays spatially anchored (Barangay II: no in-city OSM node yet) and **interim barangay boundaries** (anchor-Voronoi, labeled DERIVED) pending the LGU/PSA request | PSA census × OSM anchors × susceptibility rasters |
 | 7 | **Shed-light finding**: *every* active-land cell is within 1.5 km of a shelter-worthy site — Dagupan's problem is shelter **suitability** (20% of facilities stand in top-20% susceptibility ground), not shelter distance | OSM facilities × accessibility surface |
 | 8 | Honest small-sample ML: trend models are labeled *planning heuristics* with reported (sometimes weak) R² — no model theater | §9 of the notebook |
 

@@ -97,6 +97,71 @@ class Layers:
                                       "urban": str(row["urban"]).strip().upper() == "U",
                                       "csri": row["CSRI"] if "CSRI" in row and pd.notna(row.get("CSRI")) else None})
 
+        # ---- keep anchors inside the city: name-substring matching can grab same-named places in
+        # neighbouring towns (Lomboy & Barangay I anchored 4–5 km outside Dagupan). Re-match any
+        # outside anchor to a same-named place INSIDE the buffered city outline, else clear it.
+        self.re_anchored = []
+        try:
+            import brgypoly as _bp
+            from shapely.geometry import Point
+            outline = _bp._city_polygon_utm()
+
+            def inside(p):
+                try:
+                    X, Y = self.to_utm(p["lon"], p["lat"])
+                    return outline.contains(Point(float(X), float(Y)))
+                except Exception:
+                    return False
+
+            for a_ in self.brgy_anchors:
+                if a_["anchor"] is None or inside(a_["anchor"]):
+                    continue
+                old = a_["anchor"]
+                keys = [_norm(a_["barangay"])] + _alias.get(str(a_["barangay"]).lower(), [])
+                a_["anchor"] = next((p for p in places
+                                     for k in keys if k and k in _norm(p["name"]) and inside(p)), None)
+                self.re_anchored.append((a_["barangay"], "re-anchored inside the city" if a_["anchor"]
+                                         else "anchor cleared (no in-city place node)"))
+                # backfill the table columns the bad anchor had poisoned
+                row_i = self.brgy.index[self.brgy["barangay"] == a_["barangay"]]
+                if len(row_i):
+                    i = row_i[0]
+                    if a_["anchor"] is None:
+                        for c in ("elev_m", "dist_river_m", "mean_susc_300m", "bldg_600m"):
+                            self.brgy.loc[i, c] = np.nan
+                    else:
+                        lo, la = a_["anchor"]["lon"], a_["anchor"]["lat"]
+                        x, y = self.to_utm(lo, la)
+                        ci = int(np.clip(round((x - self.transform.c) / 30 - 0.5), 0, self.w - 1))
+                        ri = int(np.clip(round((self.transform.f - y) / 30 - 0.5), 0, self.h - 1))
+                        self.brgy.loc[i, "elev_m"] = float(self.dem[ri, ci])
+                        self.brgy.loc[i, "dist_river_m"] = float(self.dist_river[ri, ci])
+                        r0, c0 = max(0, ri - 10), max(0, ci - 10)
+                        win = self.susc[r0:ri + 11, c0:ci + 11]
+                        win = win[np.isfinite(win) & self.land_mask[r0:ri + 11, c0:ci + 11]]
+                        self.brgy.loc[i, "mean_susc_300m"] = float(win.mean()) if win.size else np.nan
+                        from scipy.spatial import cKDTree
+                        bx = np.array([b["lon"] for b in self.buildings]); by = np.array([b["lat"] for b in self.buildings])
+                        phi = np.radians((by + la) / 2.0)
+                        d = 6371000.0 * np.sqrt(np.radians(by - la) ** 2
+                                                + (np.radians(bx - lo) * np.cos(phi)) ** 2)
+                        self.brgy.loc[i, "bldg_600m"] = int((d <= 600).sum())
+        except Exception as e:
+            self.re_anchored = [("anchor containment check skipped", str(e)[:80])]
+
+        # ---- barangay boundary masks (see brgypoly.py: official file or derived interim)
+        self.brgy_cells = None
+        self.boundary_source = "anchor windows only (no boundary build)"
+        try:
+            import brgypoly as _bp
+            idx, names, meta = _bp.load()
+            if idx is not None and idx.shape == self.dem.shape and len(names) == len(self.brgy_anchors):
+                self.brgy_cells = idx
+                self.boundary_source = (meta or {}).get("source", "boundaries (unlabeled)")
+                self.boundary_meta = meta or {}
+        except Exception:
+            pass
+
         # ---- optional better elevation model (see demimport.py)
         self.dem_source = "Copernicus GLO-30 (30 m DSM)"
         ov = LAYERS / "dem_override.npy"
@@ -182,10 +247,19 @@ class Layers:
                                       "km": km, "frac": frac})
 
         rows = []
-        for b in self.brgy_anchors:
+        min_cells = 25
+        for i, b in enumerate(self.brgy_anchors):
             a = b["anchor"]
             est = None
-            if a is not None:
+            basis = "anchor window" if a is not None else None
+            if self.brgy_cells is not None:
+                cells = (self.brgy_cells == i) & self.land_mask
+                n = int(cells.sum())
+                if n >= min_cells:   # whole-area share from the polygon mask (see brgypoly)
+                    frac = float((depth[cells] > 0.15).sum()) / n
+                    est = int(round(frac * b["census"]))
+                    basis = "polygon"
+            if est is None and a is not None:
                 x, y = self.to_utm(a["lon"], a["lat"])
                 col = (x - self.transform.c) / 30 - 0.5
                 rowi = (self.transform.f - y) / 30 - 0.5
@@ -197,8 +271,9 @@ class Layers:
                 if win_land.any():
                     fr = float((win[win_land] > 0.15).mean())
                     est = int(round(fr * b["census"]))
+                    basis = "anchor window"
             rows.append({"barangay": b["barangay"], "census": b["census"], "affected_est": est,
-                         "anchor": bool(a is not None)})
+                         "anchor": bool(a is not None), "basis": basis})
         impact = pd.DataFrame(rows).sort_values("affected_est", ascending=False, na_position="last")
 
         area_km2 = float((flooded & self.land_mask).sum()) * 0.0009

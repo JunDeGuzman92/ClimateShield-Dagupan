@@ -1069,12 +1069,26 @@ def _fragment_sim():
             j3.markdown(factor_tile("Moved to shelters", f"{sf['evacuated']:,.0f}", f"{s_warn} h head start"), unsafe_allow_html=True)
             j4.markdown(factor_tile("Stranded", f"{sf['stranded']:,.0f}", "drive this to zero"), unsafe_allow_html=True)
         else:
+            choro = {}
+            if exp.get("barangay_impact") is not None:
+                for _, r in exp["barangay_impact"].iterrows():
+                    frac = None
+                    if L.brgy_cells is not None and r.get("basis") in ("polygon", "anchor window"):
+                        est = r["affected_est"]
+                        if est is not None and r["census"]:
+                            frac = min(1.0, float(est) / float(r["census"]))
+                    if frac is not None:
+                        choro[r["barangay"]] = dict(
+                            frac=frac,
+                            note=f"{100 * frac:.0f}% of residents estimated in flood zones "
+                                 f"({int(r['affected_est']):,} of {int(r['census']):,}) · basis: {r['basis']}")
             try:
                 from streamlit_folium import st_folium
-                fm = kit.make_city_map(L, depth=depth, W_cut=W, zoom=13)
+                fm = kit.make_city_map(L, depth=depth, W_cut=W, zoom=13, choro=choro)
                 st_folium(fm, height=640, use_container_width=True, returned_objects=[])
-                st.caption("Drag to pan · scroll to zoom · hover roads (% cut), facilities (flood state) and crowd pins · "
-                           "switch to satellite via the layer control (top-right)")
+                st.caption("Drag to pan · scroll to zoom · shaded barangays = share of residents estimated in "
+                           f"flood zones ({L.boundary_source.split('(')[0].strip()}) · hover roads (% cut), "
+                           "facilities (flood state), crowd pins and barangays · layer control top-right")
             except Exception:
                 fig = draw_map(depth=depth, title=f"{scen} + tide {tide:.2f} m → water +{W:.2f} m")
                 st.pyplot(fig)
@@ -1457,14 +1471,18 @@ def _fragment_tel():
     st.subheader("🌊 Pantal River gauge — manual log, sheet bridge, PAGASA hook")
     prov = st.radio("Reading source", kit.GAUGE_PROVIDERS, horizontal=True, label_visibility="collapsed")
     g_last = kit.gauge_history()
-    sheet_df, sheet_msg = None, ""
+    sheet_df, sheet_msg, feed_thresh = None, "", None
     if prov == "shared sheet (CSV URL)":
         surl = st.text_input("Shared sheet CSV export URL",
                              value=PREFS.get("gauge_sheet_url", ""),
-                             help="Publish a shared sheet (PDRRMO/Log sheet) → File → Share → Publish to web → CSV, paste the link. Columns: logged_at, level_m (, note).")
+                             help="Publish a shared sheet (PDRRMO/Log sheet) → File → Share → Publish to web → CSV, "
+                                  "paste the link. Columns: logged_at, level_m (, note); optional alert_m/alarm_m/"
+                                  "critical_m switch the tags to your official thresholds. "
+                                  "Format spec: docs/future_real_operations/GAUGE_FEED_SPEC.md")
         if surl.strip():
             sheet_df, sheet_msg = kit.read_sheet_csv(surl.strip())
             if sheet_df is not None and len(sheet_df):
+                feed_thresh = sheet_df.attrs.get("thresholds")
                 PREFS["gauge_sheet_url"] = surl.strip()
                 save_prefs(PREFS)
                 st.success(f"Sheet bridge live — {len(sheet_df)} rows, latest "
@@ -1472,15 +1490,29 @@ def _fragment_tel():
                            f"{pd.Timestamp(sheet_df.iloc[-1]['logged_at']):%b %d %H:%M}")
             else:
                 st.warning(sheet_msg or "Sheet unreadable — check the published CSV link.")
-        else:
-            st.info("Paste a published sheet CSV link to switch the log to a shared source — the city can update it from any phone.")
+        st.caption("**No hosting? Paste rows instead** — columns logged_at, level_m (, note); "
+                   "di kalat ang format basta may petsa at lebel. Any stale rows are dropped.")
+        ptxt = st.text_area("Paste agency CSV here (rows emailed/texted to you)", key="gauge_paste",
+                            height=84)
+        if st.button("📥 Load pasted rows"):
+            pdf_, pth, pmsg = kit.parse_gauge_text(ptxt)
+            if pdf_ is not None:
+                st.session_state["gauge_paste_df"] = pdf_
+                st.session_state["gauge_paste_note"] = pth
+                st.toast(f"Loaded {len(pdf_)} pasted rows")
+            else:
+                st.toast(pmsg or "Pasted rows unreadable")
     elif prov == "PAGASA hook (experimental)":
         if st.button("Probe PAGASA flood pages"):
             _, msg = kit.pagasa_hook_probe()
             st.info(msg)
+    paste_df = st.session_state.get("gauge_paste_df")
+    if paste_df is not None:
+        sheet_df = paste_df
+        feed_thresh = st.session_state.get("gauge_paste_note") or feed_thresh
     if prov == "shared sheet (CSV URL)" and sheet_df is not None and len(sheet_df):
         use_df = sheet_df
-        src_lab = "shared sheet"
+        src_lab = "pasted feed" if paste_df is not None else "shared sheet"
     else:
         use_df = g_last
         src_lab = "manual log"
@@ -1495,7 +1527,10 @@ def _fragment_tel():
     use_df = kit.gauge_history() if src_lab == "manual log" else use_df
     if len(use_df):
         last = use_df.iloc[-1]
-        state, colr = kit.gauge_class(float(last["level_m"]))
+        th = feed_thresh or dict(alert=0.8, alarm=1.2, critical=1.5)
+        th_note = " · thresholds provided by the feed" if feed_thresh else " · ⚠ thresholds are proxies (0.8/1.2/1.5 m)"
+        state, colr = kit.gauge_class(float(last["level_m"]), alert=th["alert"], alarm=th["alarm"],
+                                      critical=th["critical"])
         fresh = kit.gauge_freshness()
         age = ""
         if fresh and src_lab == "manual log":
@@ -1504,7 +1539,7 @@ def _fragment_tel():
             f"<span style='background:{colr};color:#fff;padding:5px 14px;border-radius:8px;"
             f"font-weight:700;font-size:14px;'>{state}</span> "
             f"<span style='color:#6b7280;font-size:12px;'>last: {float(last['level_m']):.2f} m · "
-            f"{pd.Timestamp(last['logged_at']):%b %d %H:%M}{age} · source: {src_lab}</span>",
+            f"{pd.Timestamp(last['logged_at']):%b %d %H:%M}{age} · source: {src_lab}{th_note}</span>",
             unsafe_allow_html=True)
         figg = go.Figure(go.Scatter(x=use_df["logged_at"], y=use_df["level_m"],
                                     mode="lines+markers", line=dict(color=ACCENT, width=2)))
@@ -1623,7 +1658,7 @@ def _fragment_wlk():
                 d_c = L.depth_grid(W_c)[0]
                 try:
                     from streamlit_folium import st_folium
-                    fm = kit.make_city_map(L, depth=d_c, W_cut=W_c, legend=False,
+                    fm = kit.make_city_map(L, depth=d_c, W_cut=W_c, legend=False, highlight=sel,
                                            focus={"lat": anchor["lat"], "lon": anchor["lon"], "name": sel},
                                            center=(anchor["lat"], anchor["lon"]), zoom=14)
                     st_folium(fm, height=520, use_container_width=True)
@@ -2441,12 +2476,15 @@ def _fragment_methods():
                                         "model": st.column_config.TextColumn(width="small"),
                                         "observed": st.column_config.TextColumn(width="medium"),
                                         "reading": st.column_config.TextColumn(width="large")})
-            st.markdown(f"**Bottom line:** the peak matches the sitrep reasonably — "
-                        f"**{vsum['windows_peak']}/31** barangay windows with water vs 23 reported still-flooded, and "
-                        f"**{vsum['pop_peak']:,.0f}** residents in flood zones vs 90,015 reported affected "
-                        f"({100 * vsum['ratio']:.0f}%). The model's weakness is **persistence**: it drains faster than "
-                        "Dagupan did, so treat any 'water gone by…' estimate as optimistic until a better DEM and "
-                        "real drainage data arrive.")
+            st.markdown(f"**Bottom line:** at the sitrep date the model now shows "
+                         f"**{vsum['poly_late']}/31** barangays with water vs **23** reported still flooded — "
+                         f"the closest like-for-like comparison so far (the old anchor-window method gave 4–8). "
+                         f"At the peak it over-counts barangays ({vsum['poly_peak']}/31 — expected, the sitrep "
+                         f"is a recession snapshot) and matches people well: "
+                         f"**{vsum['pop_peak']:,.0f}** residents in flood zones vs 90,015 reported "
+                         f"({100 * vsum['ratio']:.0f}%). Keep reading 'drainage timing' with care: core "
+                         "points still drain before outlying houses do, and better elevation + a real "
+                         "gauge feed remain the two upgrades that would tighten this further.")
         with st.expander("Calibration & honesty"):
             st.markdown(
                 f"""
@@ -2466,8 +2504,14 @@ def _fragment_methods():
                       drain/pump/evacuation benefits. Replays show real dates, not forecasts.
                     - Active-land footprint ({L.meta['active_land_km2']:.1f} km² of the official 44.47 km²) avoids counting
                       Lingayen Gulf municipal waters inside the OSM city polygon.
-                    - WorldPop grid rescaled so city totals match PSA census; barangay impact = census × flooded fraction
-                      of the barangay's 600 m anchor window.
+                    - WorldPop grid rescaled so city totals match PSA census; barangay impact = census × flooded
+                      share of the barangay area. Boundaries: **{L.boundary_source}** — no public barangay polygons
+                      exist for Dagupan (OSM admin check 2026-10-07), so the app ships interim anchor-Voronoi
+                      neighborhoods, clearly labeled DERIVED on every map and swap-in ready: drop an official
+                      `data/app_layers/brgy_boundaries.geojson` and run `python app/brgypoly.py`. Barangays with
+                      too little area coverage fall back to the old 600 m anchor window (basis column in the
+                      impact tables). Same-named place nodes outside the city are no longer used as anchors
+                      ({len(L.re_anchored) if hasattr(L, 're_anchored') else 0} re-anchored/cleared at load).
                     - **Not a hydraulic model.** Countermeasure effects are clearly-labeled proxies for community
                       conversation, prioritization and drills.
                     - Official warnings: **PAGASA** (flood advisories, rainfall & TC signals, heat index categories) and the

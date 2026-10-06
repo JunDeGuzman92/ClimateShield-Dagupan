@@ -1,0 +1,7 @@
+{
+ "source": "derived (voronoi from OSM place anchors)",
+ "provenance": "Interim: anchor Voronoi clipped to the buffered OSM city outline. Dagupan has no published barangay polygons (OSM admin check 2026-10-07); LGU/PSA request in progress. Drop an official data/app_layers/brgy_boundaries.geojson and re-run to switch.",
+ "barangays": 30,
+ "polygons_file": "brgy_boundaries_derived.geojson",
+ "built": "2026-10-07T00:14"
+}
