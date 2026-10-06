@@ -17,6 +17,7 @@ import ops
 import replay
 import response as rsp
 import sms
+from geo import haversine
 
 LAY = Path(__file__).resolve().parents[1] / "data" / "app_layers"
 STATE = LAY / "exercise.json"
@@ -165,7 +166,8 @@ def _apply(L, ev, state, W):
 
 
 def tick(L, state=None):
-    """Fire any due events; returns (state, newly_fired_list)."""
+    """Fire due events, advance unit missions; returns (state, newly_fired_list). Physics notes land in
+    state['phys_notes'] for the UI to toast."""
     state = state or load()
     if not state.get("running"):
         return state, []
@@ -177,7 +179,8 @@ def tick(L, state=None):
             _apply(L, ev, state, water_at(L, story, ev["h"]))
             ev["fired_at"] = datetime.now().isoformat(timespec="seconds")
             fired.append(ev)
-    if fired:
+    changed = _physics(L, state, h)
+    if fired or changed:
         save(state)
     return state, fired
 
@@ -188,6 +191,172 @@ def acknowledge(event_id):
         if ev["id"] == event_id and not ev.get("acked_at"):
             ev["acked_at"] = datetime.now().isoformat(timespec="seconds")
     save(state)
+
+
+# ----------------------------------------------------------------------------- unit mission physics
+# Missions advance with the STORM clock (not wall time), so travel takes real storm-hours at any speed.
+# state["missions"][unit_id] = {req, phase(out|back|home), eta_out/eta_back/eta_home, travel_h, km, cap,
+#                              load, need, people, delivered}
+# state["delivered"][req_id] = people delivered so far (across all units serving that request).
+NEED_CARRIES = {"🚤 Rescue boat / evacuation", "🏠 Shelter space", "🩹 Medical"}
+LOAD_H = 0.30     # time to board people / hand over aid, in storm-hours
+PREP_H = 0.10     # launch / prep before rolling
+
+
+def anchor_of(L, brgy):
+    return next((b["anchor"] for b in L.brgy_anchors if b["barangay"] == brgy), None)
+
+
+def depth_at_anchor(L, brgy, W):
+    """Flood depth at a barangay's anchor cell (None if no anchor)."""
+    a = anchor_of(L, brgy)
+    if a is None:
+        return None
+    from geo import Transformer
+    x, y = L.to_utm(a["lon"], a["lat"])
+    ci = int(np.clip(round((x - L.transform.c) / 30 - 0.5), 0, L.w - 1))
+    ri = int(np.clip(round((L.transform.f - y) / 30 - 0.5), 0, L.h - 1))
+    return max(W - float(L.dem[ri, ci]), 0.0)
+
+
+def can_serve(L, unit_type, brgy, W):
+    """(ok, reason) — vehicles/teams cannot cross flooded requests; boats/suports are not gated by depth."""
+    ph = ops.UNIT_PHYSICS.get(unit_type, {})
+    if ph.get("kind") in ("vehicle", "team") and ph.get("max_water_m") is not None:
+        d = depth_at_anchor(L, brgy, W)
+        if d is not None and d > ph["max_water_m"]:
+            return False, f"{unit_type} can't cross {d:.2f} m of water at that request — send a boat (max {ph['max_water_m']:.2f} m)"
+    return True, ""
+
+
+def _stamp_request(req_id, **fields):
+    df = rsp.load_requests()
+    m = df["id"] == req_id
+    if m.any():
+        for k, v in fields.items():
+            df.loc[m, k] = v
+        rsp.save_requests(df)
+
+
+def assign(L, state, unit_id, req_id):
+    """Assign a unit to a request during a running exercise. Creates a mission with travel time and
+    capacity; the request is auto-resolved when enough people have been delivered (or the support
+    unit returns). Returns (ok, detail)."""
+    reqs = rsp.load_requests()
+    rq = reqs[reqs["id"] == req_id]
+    if rq.empty:
+        return False, "request not found"
+    rq = rq.iloc[0]
+    rs = ops.load_resources()
+    un = rs[(rs["unit_id"] == unit_id) & (rs["status"] == "available")]
+    if un.empty:
+        return False, f"{unit_id} is not available"
+    un = un.iloc[0]
+    ph = ops.UNIT_PHYSICS.get(un["type"], dict(speed_kmh=20, capacity=0, kind="vehicle"))
+    h = sim_hour(state)
+    W = water_at(L, state["story"], h)
+    ok, reason = can_serve(L, un["type"], rq["barangay"], W)
+    if not ok:
+        return False, reason
+    a_req = anchor_of(L, rq["barangay"])
+    a_unit = anchor_of(L, un["location"])
+    if a_req and a_unit:
+        km = max(0.3, haversine(a_unit["lat"], a_unit["lon"], a_req["lat"], a_req["lon"]) / 1000.0)
+    else:
+        km = 0.5  # co-located / unknown base
+    travel = max(0.25, PREP_H + km / max(float(ph.get("speed_kmh", 20)), 1))
+    cap = int(ph.get("capacity", 0))
+    state.setdefault("missions", {})[unit_id] = dict(
+        req=req_id, phase="out", start_h=h, eta_out=h + travel, km=round(km, 1), travel_h=round(travel, 2),
+        cap=cap if rq["need"] in NEED_CARRIES else 0, need=rq["need"], people=int(rq["people"] or 1),
+        delivered=0, unit_name=str(un.get("name") or unit_id))
+    state.setdefault("delivered", {}).setdefault(req_id, 0)
+    ops.assign_resource(unit_id, req_id, status="en route")
+    _stamp_request(req_id, status="assigned" if rq["status"] in ("new", "acknowledged") else rq["status"],
+                   assigned_to=unit_id, assigned_at=rsp._now(), updated_at=rsp._now())
+    trips = " · support (carries nobody)" if cap == 0 or rq["need"] not in NEED_CARRIES else \
+        f" · {max(1, -(-int(rq['people'] or 1) // max(cap, 1)))} trip(s) of {cap}"
+    save(state)
+    return True, f"{un['type']} en route · {km:.1f} km · ~{travel:.1f} storm-hours out{trips}"
+
+
+def _physics(L, state, h):
+    """Advance missions one tick; appends human-readable notes to state['phys_notes']."""
+    notes = []
+    missions = state.setdefault("missions", {})
+    delivered = state.setdefault("delivered", {})
+    rs = ops.load_resources()
+    rstat = rs.set_index("unit_id")["status"].to_dict() if len(rs) else {}
+    reqs = rsp.load_requests()
+    rstat_req = reqs.set_index("id")["status"].to_dict() if len(reqs) else {}
+    for uid, m in list(missions.items()):
+        # unit lost to maintenance (E5): mid-outbound the trip is aborted (request back to the queue);
+        # mid-return the people aboard reach safety first, then the unit stands down.
+        if m["phase"] != "home" and rstat.get(uid) == "maintenance" and m["phase"] != "back":
+            _stamp_request(m["req"], status="acknowledged")
+            del missions[uid]
+            notes.append(f"⚠ {m['unit_name']} went down before reaching {m['req']} — back in the queue")
+            continue
+        if rstat_req.get(m["req"]) == "resolved":
+            ops.assign_resource(uid, "", status="available")
+            del missions[uid]
+            notes.append(f"✅ {m['unit_name']} freed — {m['req']} resolved")
+            continue
+        if m["phase"] == "out" and h >= m["eta_out"]:
+            if m["cap"] and m["need"] in NEED_CARRIES:
+                # loads already aboard other units serving this request are not boardable again
+                inflight = sum((mm.get("load") or 0) for mm in missions.values()
+                               if mm is not m and mm["req"] == m["req"] and mm["phase"] == "back")
+                remaining = max(m["people"] - delivered.get(m["req"], 0) - inflight, 0)
+                m["load"] = int(min(m["cap"], remaining))
+                m["phase"], m["eta_back"] = "back", h + LOAD_H + m["travel_h"]
+                notes.append(f"📍 {m['unit_name']} on scene at {m['req']} — boarding {m['load']}")
+            else:
+                m["phase"], m["eta_back"] = "back", h + LOAD_H + m["travel_h"]
+                notes.append(f"📍 {m['unit_name']} reached {m['req']}")
+        elif m["phase"] == "back" and h >= m["eta_back"]:
+            if m["cap"] and m.get("load"):
+                delivered[m["req"]] = delivered.get(m["req"], 0) + m["load"]
+                m["delivered"] += m["load"]
+                rem = m["people"] - delivered[m["req"]]
+                notes.append(f"🎽 {m['unit_name']} delivered {m['load']} to safety"
+                             + (f" — {rem} still waiting" if rem > 0 else f" — {m['req']} complete"))
+                m["load"] = 0
+                if rem <= 0:
+                    _stamp_request(m["req"], status="resolved", resolved_at=rsp._now(), updated_at=rsp._now())
+                    ops.assign_resource(uid, "", status="returning")
+                    m["phase"], m["eta_home"] = "home", h + m["travel_h"]
+                elif rstat.get(uid) == "maintenance":
+                    del missions[uid]
+                    notes.append(f"⚠ {m['unit_name']} down after drop-off — not making another trip")
+                else:
+                    m["phase"], m["eta_out"] = "out", h + m["travel_h"]
+            else:
+                _stamp_request(m["req"], status="resolved", resolved_at=rsp._now(), updated_at=rsp._now())
+                ops.assign_resource(uid, "", status="returning")
+                m["phase"], m["eta_home"] = "home", h + m["travel_h"]
+                notes.append(f"✅ {m['unit_name']} finished at {m['req']}")
+        elif m["phase"] == "home" and h >= m["eta_home"]:
+            if rstat.get(uid) != "maintenance":
+                ops.assign_resource(uid, "", status="available")
+            del missions[uid]
+            notes.append(f"🏠 {m['unit_name']} is back at base" if rstat.get(uid) != "maintenance"
+                         else f"🏠 {m['unit_name']} home — in maintenance")
+    if notes:
+        state["phys_notes"] = state.get("phys_notes", []) + notes
+    return bool(notes)
+
+
+def people_remaining(state, reqs=None):
+    """People still waiting for pickup across open requests (delivered people excluded)."""
+    reqs = reqs if reqs is not None else rsp.load_requests()
+    delivered = state.get("delivered") or {}
+    total = 0
+    if len(reqs):
+        opn = reqs[reqs["status"] != "resolved"]
+        for _, r in opn.iterrows():
+            total += max(0, int(pd.to_numeric(r["people"], errors="coerce") or 0) - int(delivered.get(r["id"], 0)))
+    return total
 
 
 # ----------------------------------------------------------------------------- scoring
@@ -219,7 +388,7 @@ def score(L, state=None):
     resolved = reqs[reqs["status"] == "resolved"] if n else reqs
     crit = reqs[reqs["urgency"] == "critical"] if n else reqs
     crit_res = crit[crit["status"] == "resolved"] if len(crit) else crit
-    waiting = int(pd.to_numeric(reqs[reqs["status"] != "resolved"]["people"], errors="coerce").fillna(0).sum()) if n else 0
+    waiting = people_remaining(state, reqs)
     fired = [e for e in state.get("events", []) if e.get("fired_at")]
     acked = [e for e in fired if e.get("acked_at")]
     ack_t = [_mins(e["fired_at"], e["acked_at"]) for e in acked]
@@ -278,6 +447,8 @@ def stop(L):
     hist = pd.read_csv(HISTORY) if HISTORY.exists() else pd.DataFrame()
     pd.concat([pd.DataFrame([row]), hist], ignore_index=True).to_csv(HISTORY, index=False)
     state["final_score"] = sc
+    state["missions"] = {}      # a stopped run leaves no ghost mission timeline
+    state["delivered"] = {}
     save(state)
     return state, sc
 

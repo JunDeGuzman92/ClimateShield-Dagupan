@@ -1669,6 +1669,11 @@ def _fragment_exercise():
     state, fired = exercise.tick(L)
     for e in fired:
         st.toast(f"⚠ Storm hour {e['h']:.0f}: {e['title']}")
+    for note in (state.get("phys_notes") or []):
+        st.toast(note)
+    if state.get("phys_notes"):
+        state["phys_notes"] = []
+        exercise.save(state)
     with st.container(border=True):
         if not state.get("running"):
             st.markdown("#### 🎯 Timed exercise")
@@ -1804,7 +1809,12 @@ def _fragment_response():
     unhandled = inbox[inbox["handled"].astype(str) != "True"] if len(inbox) else inbox
     k = st.columns(6)
     k[0].metric("Open requests", f"{len(open_r)}")
-    k[1].metric("People waiting", f"{int(pd.to_numeric(open_r['people'], errors='coerce').fillna(0).sum()) if len(open_r) else 0:,}")
+    if ex_state.get("running"):
+        k[1].metric("People waiting", f"{exercise.people_remaining(ex_state, open_r):,}"
+                    + (f" of {int(pd.to_numeric(open_r['people'], errors='coerce').fillna(0).sum()):,}" if len(open_r) else ""),
+                    "pickup still owed")
+    else:
+        k[1].metric("People waiting", f"{int(pd.to_numeric(open_r['people'], errors='coerce').fillna(0).sum()) if len(open_r) else 0:,}")
     k[2].metric("Critical open", f"{int((open_r['urgency'] == 'critical').sum()) if len(open_r) else 0}")
     k[3].metric("Unread texts (sim)", f"{len(unhandled)}")
     cap = pd.to_numeric(shel["capacity"], errors="coerce")
@@ -1888,20 +1898,58 @@ def _fragment_response():
                 avail = res[res["status"] == "available"] if len(res) else res
                 st.markdown("**Assign a unit**")
                 if len(avail):
-                    unit = st.selectbox("Available unit", avail["unit_id"].tolist(), key="assign_unit",
-                                        format_func=lambda u: f"{u} · " + " · ".join(
-                                            avail[avail["unit_id"] == u][["type", "name", "location"]].iloc[0].astype(str)))
-                    if st.button("Assign to " + pick, key="assign_btn", use_container_width=True):
-                        ops.assign_resource(unit, pick)
-                        df = rsp.load_requests()
-                        new = df.copy()
-                        new.loc[new["id"] == pick, ["status", "assigned_to"]] = ["assigned", unit]
-                        rsp.save_requests(rsp.stamp_status_changes(new, df))
-                        st.session_state.pop("disp_pick", None)   # move on to the next waiting request
-                        st.toast(f"{unit} assigned to {pick}")
-                        st.rerun()
+                    feasible, blocked = avail, []
+                    if ex_state.get("running"):
+                        _h = exercise.sim_hour(ex_state)
+                        _W = exercise.water_at(L, ex_state["story"], _h)
+                        _a = _anchor(rq["barangay"])
+                        ok_rows = []
+                        for _, _u in avail.iterrows():
+                            ok, reason = exercise.can_serve(L, _u["type"], rq["barangay"], _W)
+                            (ok_rows if ok else blocked).append(_u if ok else (_u, reason))
+                        if ok_rows:
+                            feasible = pd.DataFrame(ok_rows)
+                        if blocked:
+                            st.caption("Ineligible at this water level "
+                                       + (f"(+{_W:.2f} m): " if _W > 0 else "(dry streets): ")
+                                       + "; ".join(f"{u['unit_id']} ({u['type']}) — {why.split(' — ')[-1]}"
+                                                   for u, why in blocked))
+                    if len(feasible):
+                        unit = st.selectbox("Available unit", feasible["unit_id"].tolist(), key="assign_unit",
+                                            format_func=lambda u: f"{u} · " + " · ".join(
+                                                feasible[feasible["unit_id"] == u][["type", "name", "location"]].iloc[0].astype(str)))
+                        if st.button("Assign to " + pick, key="assign_btn", use_container_width=True):
+                            if ex_state.get("running"):
+                                ok, det = exercise.assign(L, ex_state, unit, pick)
+                            else:
+                                ops.assign_resource(unit, pick)
+                                df = rsp.load_requests()
+                                new = df.copy()
+                                new.loc[new["id"] == pick, ["status", "assigned_to"]] = ["assigned", unit]
+                                rsp.save_requests(rsp.stamp_status_changes(new, df))
+                                ok, det = True, f"{unit} assigned to {pick}"
+                            if ok:
+                                st.session_state.pop("disp_pick", None)   # move on to the next waiting request
+                            st.toast(det)
+                            st.rerun()
+                    else:
+                        st.caption("No eligible unit at this water level — send a boat, or wait for the water to drop.")
                 else:
                     st.caption("No units marked available — register boats/trucks in 🚤 Resources.")
+                miss = (ex_state.get("missions") or {})
+                if miss:
+                    with st.expander(f"🚤 {len(miss)} unit(s) on mission", expanded=True):
+                        rows = []
+                        for uid, m in miss.items():
+                            eta = {"out": m["eta_out"], "back": m.get("eta_back"), "home": m.get("eta_home")}.get(m["phase"], 0)
+                            doing = {"out": "en route to scene", "back": "carrying to safety",
+                                     "home": "returning to base"}[m["phase"]]
+                            deliv = f" · {m['delivered']}/{m['people']} delivered" if m.get("cap") else ""
+                            rows.append(f"**{m['unit_name']}** → {m['req']} · {doing} · ETA h{eta:.1f}"
+                                        f" · {m['km']} km{deliv}")
+                        st.markdown("  \n".join(rows))
+                        st.caption("Units travel on the storm clock; each trip carries the unit's capacity. "
+                                   "Requests auto-resolve when everyone is delivered.")
                 st.markdown("**Simulate dispatch message**")
                 orgs = rsp.load_directory()["organisation"].tolist()
                 to = st.selectbox("To (simulated)", orgs, key="disp_to")

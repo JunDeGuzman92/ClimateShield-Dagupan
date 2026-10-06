@@ -5,6 +5,15 @@ Lets the app run where native PROJ/GDAL DLLs are unavailable or blocked.
 """
 import numpy as np
 
+
+def haversine(lat1, lon1, lat2, lon2):
+    """Great-circle distance in metres."""
+    import math
+    p = math.pi / 180.0
+    a = (math.sin((lat2 - lat1) * p / 2) ** 2
+         + math.cos(lat1 * p) * math.cos(lat2 * p) * math.sin((lon2 - lon1) * p / 2) ** 2)
+    return 12742.0 * math.asin(math.sqrt(a)) * 1000.0
+
 _A = 6378137.0
 _F = 1 / 298.257223563
 _K0 = 0.9996

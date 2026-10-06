@@ -22,6 +22,22 @@ RESOURCE_TYPES = ["🚤 Rubber boat", "🛶 Banca", "🚚 Truck", "🚑 Ambulanc
                   "🔦 Generator / lights", "👥 Rescue team"]
 RESOURCE_STATUS = ["available", "assigned", "en route", "on scene", "returning", "maintenance"]
 
+# Practice physics for the response simulator (no engineering claims):
+#   speed_kmh  — cruise speed used for ETA (straight-line distance)
+#   capacity   — people carried per trip; 0 = support unit (delivers, carries nobody)
+#   kind       — boat: works in floodwater · vehicle/team: refuses when water at the request > max_water_m
+#   max_water_m — for vehicles/teams (boats are not gated)
+UNIT_PHYSICS = {
+    "🚤 Rubber boat": dict(speed_kmh=8, capacity=8, kind="boat", max_water_m=None),
+    "🛶 Banca": dict(speed_kmh=6, capacity=6, kind="boat", max_water_m=None),
+    "🚑 Ambulance": dict(speed_kmh=30, capacity=4, kind="vehicle", max_water_m=0.30),
+    "🚒 Fire truck": dict(speed_kmh=28, capacity=0, kind="vehicle", max_water_m=0.30),
+    "🚚 Truck": dict(speed_kmh=25, capacity=15, kind="vehicle", max_water_m=0.30),
+    "🚐 Van / transport": dict(speed_kmh=30, capacity=10, kind="vehicle", max_water_m=0.30),
+    "🔦 Generator / lights": dict(speed_kmh=25, capacity=0, kind="vehicle", max_water_m=0.05),
+    "👥 Rescue team": dict(speed_kmh=5, capacity=4, kind="team", max_water_m=0.30),
+}
+
 
 def merge_edits(ed_state, base, fresh, id_col):
     """Apply ONLY the cells a user changed in a Streamlit data_editor onto the latest data on disk.
@@ -137,9 +153,9 @@ def save_resources(df):
     df.to_csv(RESOURCES, index=False)
 
 
-def assign_resource(unit_id, request_id):
+def assign_resource(unit_id, request_id, status="assigned"):
     df = load_resources()
-    df.loc[df["unit_id"] == unit_id, ["status", "assigned_request", "updated_at"]] = ["assigned", request_id, _now()]
+    df.loc[df["unit_id"] == unit_id, ["status", "assigned_request", "updated_at"]] = [status, request_id, _now()]
     save_resources(df)
 
 
