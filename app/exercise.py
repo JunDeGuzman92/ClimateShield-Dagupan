@@ -579,7 +579,7 @@ def debrief_figure(L, state, sc=None):
         plt.Line2D([], [], marker="v", ls="", color="#6b7280", label="text → request"),
         plt.Line2D([], [], marker="o", ls="", color="#f59e0b", label="unit assigned"),
         plt.Line2D([], [], marker="*", ls="", color="#16a34a", label="delivered / resolved"),
-    ], fontsize=8, loc="lower left", bbox_to_anchor=(0.0, 1.02), ncol=4, framealpha=0.95)
+    ], fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=4, framealpha=0.95)
     sc = sc or state.get("final_score") or {}
     k = sc.get("kpis", {})
     rows = [

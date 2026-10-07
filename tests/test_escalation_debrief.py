@@ -70,4 +70,7 @@ def test_debrief_figure_renders_the_run(layers):
     tables = [c for c in fig.axes[1].get_children() if type(c).__name__ == "Table"]
     assert tables, "score rows must use an auto-layout Table (hand-stacked text overlapped the footer)"
     leg = ax.get_legend()
-    assert leg.get_bbox_to_anchor().bounds[1] >= 1.0, "legend must sit above the axes, never on the data"
+    fig.canvas.draw()
+    leg_bb, title_bb = leg.get_window_extent(), ax.title.get_window_extent()
+    assert not leg_bb.overlaps(title_bb), "legend must not cover the chart title"
+    assert not leg_bb.overlaps(ax.get_window_extent()), "legend must not cover the plot area"
