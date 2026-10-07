@@ -69,3 +69,5 @@ def test_debrief_figure_renders_the_run(layers):
     assert len(ys) >= 2, "event labels must stagger at two heights"
     tables = [c for c in fig.axes[1].get_children() if type(c).__name__ == "Table"]
     assert tables, "score rows must use an auto-layout Table (hand-stacked text overlapped the footer)"
+    leg = ax.get_legend()
+    assert leg.get_bbox_to_anchor().bounds[1] >= 1.0, "legend must sit above the axes, never on the data"

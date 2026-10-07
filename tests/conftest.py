@@ -22,8 +22,8 @@ sys.path.insert(0, str(APP_DIR))
 RUNTIME_FILES = [
     "ui_prefs.json", "live_cache.json", "rescue_requests.csv", "sim_inbox.csv", "sim_outbox.csv", "sim_contacts.csv",
     "resources.csv", "shelters.csv", "response_directory.csv", "exercise.json", "exercise_history.csv",
-    "crowd_reports.csv", "pantal_gauge_log.csv", "philsensors_cache.json",
-    "manual_anchors.json", "feedback_notes.csv",
+    "crowd_reports.csv", "pantal_gauge_log.csv", "philsensors_cache.json", "manual_anchors.json", "feedback_notes.csv",
+    "cooling.csv",
 ]
 DEFAULT_PREFS = {
     "kiosk": False, "wall_seconds": 15, "last_cycle_ts": 0.0, "cycle_idx": 0, "lang": "English", "theme2": "day",
@@ -49,7 +49,7 @@ def sandbox(tmp_path):
             shutil.copy2(LAY / f, bak / f)
     # clean, known starting state (keep the PhilSensors cache so tests don't hit the network)
     for f in RUNTIME_FILES:
-        if f not in ("philsensors_cache.json", "live_cache.json"):
+        if f not in ("philsensors_cache.json", "live_cache.json", "metar_cache.json", "dam_cache.json"):
             (LAY / f).unlink(missing_ok=True)
     (LAY / "ui_prefs.json").write_text(json.dumps(DEFAULT_PREFS), encoding="utf-8")
     yield

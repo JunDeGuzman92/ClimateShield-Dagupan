@@ -159,7 +159,11 @@ def heat_plan(L, story):
     tmax, tmin = story["tmax"], story["tmin"]
     out = []
     stress = 0.0
-    beats = story["beats"]
+    beats = story.get("beats") or [(6, "Sunrise — coolest part of the day."),
+                                   (9, "Heat index entering caution bands."),
+                                   (12, "Midday heat — shade, water, rest."),
+                                   (14, "Peak heat window."),
+                                   (17, "Cooling begins; the sea breeze helps the coast first.")]
     for h in hours:
         phase = np.cos((h - 14.5) / 24.0 * 2 * np.pi)
         t = tmin + (tmax - tmin) * (phase + 1) / 2

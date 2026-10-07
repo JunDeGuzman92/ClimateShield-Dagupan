@@ -21,8 +21,201 @@ import pandas as pd
 
 LAY = Path(__file__).resolve().parents[1] / "data" / "app_layers"
 CACHE = LAY / "philsensors_cache.json"
+METAR_CACHE = LAY / "metar_cache.json"
+DAM_CACHE = LAY / "dam_cache.json"
 BASE = "https://philsensors.asti.dost.gov.ph"
 DAGUPAN = (16.0432, 120.3342)
+UA = "ClimateShieldDagupan/1.0 (community disaster-awareness; low-rate polling)"
+
+# aviation stations near enough to sanity-check the model grid (name, ICAO, lat, lon, note)
+METAR_STATIONS = [
+    ("Laoag Intl (RPLI)", "16.0432-north", "RPLI", 18.1817, 120.5311, "north coast, sea-level"),
+    ("Clark Intl (RPLC)", "15.19-south", "RPLC", 15.1858, 120.5590, "central plain, sea-level"),
+]
+
+
+def _ua():
+    return {"User-Agent": UA}
+
+
+def read_json_cache(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def fetch_metar(max_age_s=1800, force=False):
+    """Nearest real station observations (aviationweather.gov, free, no key, ~30–60 min cadence).
+
+    Neither station is Dagupan — Laoag ≈238 km NNW, Clark ≈95 km S — so these read as a
+    *sanity check on the model*, not city truth. Returns cached dict with per-station obs time.
+    """
+    prev = read_json_cache(METAR_CACHE)
+    if prev and not force and time.time() - prev.get("ts", 0) < max_age_s and prev.get("stations"):
+        return prev
+    out = []
+    for label, _key, icao, la, lo, note in METAR_STATIONS:
+        try:
+            with urllib.request.urlopen(
+                    urllib.request.Request(
+                        f"https://aviationweather.gov/api/data/metar?ids={icao}&format=json",
+                        headers=_ua()), timeout=25) as r:
+                d = json.loads(r.read().decode("utf-8"))
+            m = (d or [None])[0] or {}
+            obs = m.get("obsTime")
+            t, td = m.get("temp"), m.get("dewp")
+            rh = None
+            if t is not None and td is not None:
+                try:
+                    rh = round(100 * math.exp((17.625 * td) / (243.04 + td)
+                                             - (17.625 * t) / (243.04 + t)), 1)
+                except Exception:
+                    rh = None
+            out.append(dict(station=label, icao=icao, lat=la, lon=lo, note=note,
+                            km_from_dagupan=round(_km(*DAGUPAN, la, lo), 0),
+                            obs_time=obs, temp_c=t, dewpoint_c=td, rh_pct=rh,
+                            wind_kt=m.get("wspd"), visib=m.get("visib"), raw=(m.get("rawOb") or "")[:90]))
+        except Exception as e:
+            out.append(dict(station=label, icao=icao, lat=la, lon=lo, note=note, error=f"{type(e).__name__}"))
+    res = dict(ts=time.time(), fetched_at=datetime.now().isoformat(timespec="minutes"), stations=out)
+    try:
+        METAR_CACHE.write_text(json.dumps(res), encoding="utf-8")
+    except Exception:
+        pass
+    if not any(s.get("temp_c") is not None for s in out) and prev and prev.get("stations"):
+        prev = dict(prev)
+        prev["error"] = "aviationweather.gov unreachable — showing the stored check"
+        return prev
+    return res
+
+
+AGNO_DAMS = ("Ambuklao", "Binga", "San Roque")
+FLOOD_PAGE = "https://www.pagasa.dost.gov.ph/flood"
+
+
+def _dam_table_rows(html):
+    from html.parser import HTMLParser
+
+    class T(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.rows, self.cur, self.cell, self.in_td = [], [], "", False
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("td", "th"):
+                self.in_td = True
+                self.cell = dict(attrs).get("class", "")
+
+        def handle_endtag(self, tag):
+            if tag in ("td", "th"):
+                self.in_td = False
+            if tag == "tr" and self.cur:
+                self.rows.append(self.cur)
+                self.cur = []
+
+        def handle_data(self, data):
+            if self.in_td:
+                self.cur.append((self.cell, data.strip()))
+
+    p = T()
+    p.feed(html)
+    return p.rows
+
+
+def _num(x):
+    try:
+        return float(str(x).replace(",", ""))
+    except Exception:
+        return None
+
+
+def parse_dams(html, fetched_at):
+    """Parse the PAGASA dam table + Agno basin status out of the flood page HTML.
+
+    Pure function (no network) — tested against saved page fixtures in tests/.
+    Each data row is accepted only if RWL − NHWL matches the table's own deviation
+    column within 0.03 m; anything else is dropped, never shown.
+    Returns dict(dams=[...], basin={...}|None, obs_label).
+    """
+    rows = _dam_table_rows(html)
+    dams = []
+    for r in rows:
+        cells = [t for _, t in r]
+        if not cells or cells[0] not in AGNO_DAMS or len(cells) < 9:
+            continue
+        name, tcell, rwl, a24, dev, nhwl, dev_nhwl, rule, dev_rule = cells[:9]
+        rwl, dev24, nhwl, devn = _num(rwl), _num(dev) if a24.strip() == "24" else None, _num(nhwl), _num(dev_nhwl)
+        if rwl is None or nhwl is None:
+            continue
+        if devn is not None and abs((rwl - nhwl) - devn) > 0.03:
+            continue  # cross-check failed: don't trust this row
+        gate = " · ".join(c for c in cells[9:] if c) or None
+        dams.append(dict(name=name, obs_time=tcell, rwl_m=rwl, dev24h_m=dev24, nhwl_m=nhwl,
+                         over_nhwl_m=round(rwl - nhwl, 2), rule_m=_num(rule), dev_rule_m=_num(dev_rule),
+                         gates=gate))
+    basin = None
+    for m in re.finditer(r"<a([^>]*)>([^<]{0,60})</a>", html):
+        attrs, txt = m.group(1), m.group(2).strip()
+        if "agno.pdf" in attrs:
+            level = "non-flood" if "non-flood" in attrs else (
+                "flood-advisory" if "advisory" in attrs else "flood-watch" if "watch" in attrs else "unknown")
+            basin = dict(status=txt.strip() or None, level=level,
+                         target="Agno river basin", link="https://pubfiles.pagasa.dost.gov.ph/pagasaweb/files/hmd/riverbasin/agno.pdf")
+            break
+    # no reliable observation date is published — only e.g. '08:00 AM'. Assume same-day,
+    # rolling back a day if we fetch before the stated hour.
+    obs_label = (dams[0]["obs_time"] if dams else None)
+    obs_date = None
+    if obs_label:
+        m = re.search(r"(\d{1,2}):(\d{2})\s*(AM|PM)", obs_label, re.I)
+        if m:
+            import datetime as _dt
+            now = _dt.datetime.now()
+            hr = int(m.group(1)) % 12 + (12 if m.group(3).upper() == "PM" else 0)
+            obs = now.replace(hour=hr, minute=int(m.group(2)), second=0, microsecond=0)
+            if obs > now:
+                obs = obs - _dt.timedelta(days=1)
+            obs_date = obs.strftime("%b %d %H:%M")
+    return dict(dams=dams, basin=basin, obs_label=obs_date)
+
+
+def fetch_dams(max_age_s=6 * 3600, force=False):
+    """PAGASA dam table + Agno basin status, parsed from the public /flood page (slow server: tolerant).
+
+    Agno chain dams Ambuklao→Binga→San Roque. Columns verified by cross-check
+    (RWL − NHWL == the table's own Deviation column, e.g. San Roque 283.15 − 280.00 = 3.15).
+    Gate/outflow cells parse when present. Basin status anchor (agno.pdf, e.g. 'Non-Flood Watch')
+    included. No reliable observation *date* is published, only e.g. '08:00 AM' — date is assumed
+    same-day, rolling back a day if we fetch before the stated hour.
+    """
+    prev = read_json_cache(DAM_CACHE)
+    if prev and not force and time.time() - prev.get("ts", 0) < max_age_s and prev.get("dams"):
+        return prev
+    try:
+        with urllib.request.urlopen(urllib.request.Request(FLOOD_PAGE, headers=_ua()), timeout=75) as r:
+            html = r.read().decode("utf-8", "replace")
+    except Exception as e:
+        if prev and prev.get("dams"):
+            prev = dict(prev)
+            prev["error"] = f"pagasa.dost.gov.ph unreachable ({type(e).__name__}) — showing the stored check"
+            return prev
+        return dict(ts=0, fetched_at=None, obs_label=None, dams=[], basin=None,
+                    error=f"pagasa.dost.gov.ph unreachable ({type(e).__name__})")
+    parsed = parse_dams(html, fetched_at=None)
+    dams, basin, obs_date = parsed["dams"], parsed["basin"], parsed["obs_label"]
+    res = dict(ts=time.time(), fetched_at=datetime.now().isoformat(timespec="minutes"),
+               obs_label=obs_date, dams=dams, basin=basin,
+               note="Dam tables: PAGASA Flood page · San Roque releases flow down the Agno toward Dagupan")
+    try:
+        DAM_CACHE.write_text(json.dumps(res), encoding="utf-8")
+    except Exception:
+        pass
+    if not dams and prev and prev.get("dams"):
+        prev = dict(prev)
+        prev["error"] = "dam table unparseable this check — showing the stored check"
+        return prev
+    return res
 PARAM = {"1": ("rain", "mm"), "4": ("water level", "m"), "6": ("pressure", "hPa"), "5": ("air temp", "°C")}
 
 

@@ -28,6 +28,7 @@ import gauges
 import demimport
 import exercise
 import feedback
+import heat
 import replay
 import validation
 
@@ -904,42 +905,145 @@ if page == NAV[0]:
                        "so most low barangays flood together once water passes +0.15 m. Not a hydraulic model.")
 
         with tab_h:
-            hkeys = list(cinema.HEAT_STORIES.keys())
-            hlabels = {k: cinema.HEAT_STORIES[k]["title"] for k in hkeys}
-            hsel = st.radio("Heat scenario", hkeys, format_func=lambda k: hlabels[k], horizontal=True,
-                            label_visibility="collapsed", key="film_heat")
-            hstory = cinema.HEAT_STORIES[hsel]
-            hc, hm = st.columns([1.25, 1])
-            with hc:
-                fig_h, hplan = cinema.heat_chart(L, hstory, theme_text=BEIGE_TEXT, grid=PLOT_GRID, height=420)
-                st.plotly_chart(fig_h, use_container_width=True, config={"displayModeBar": False})
-                st.caption("Hover a point for the hour's protocol line. Bands = PAGASA heat-index categories.")
-            pk = max(hplan, key=lambda f: f["hi"])
-            with hm:
-                hh = st.select_slider("Hour", options=[f["hour"] for f in hplan], value=pk["hour"], key="heat_hour",
-                                      format_func=lambda h: f"{h:02d}:00")
-                fh = next(f for f in hplan if f["hour"] == hh)
-                pts = cinema.heat_barangay_points(L, fh["hi"])
-                try:
-                    import folium
-                    from streamlit_folium import st_folium
-                    hmap = folium.Map(location=(16.055, 120.335), zoom_start=12, tiles=None)
-                    folium.TileLayer(tiles=kit.ESRI_GRAY[0], attr=kit.ESRI_GRAY[1]).add_to(hmap)
-                    for pt in pts:
-                        folium.CircleMarker([pt["lat"], pt["lon"]], radius=6 + 10 * (pt["pop"] / 15000), color="white",
-                                            weight=1, fill=True, fill_color=pt["color"], fill_opacity=0.9,
-                                            tooltip=f"{pt['name']} · feels like {pt['hi']:.0f}°C · pop {pt['pop']:,}").add_to(hmap)
-                    st_folium(hmap, height=360, use_container_width=True, returned_objects=[], key="heat_map")
-                except Exception as e:
-                    st.info(f"Map unavailable ({type(e).__name__}).")
-                st.caption(f"{hh:02d}:00 · city heat index {fh['hi']:.0f}°C · circles = barangays (size = population, "
-                           "colour = felt heat with urban-heat offset)")
-            h1, h2, h3, h4 = st.columns(4)
-            h1.markdown(factor_tile("Peak heat index", f"{pk['hi']:.0f}°C", f"{dc.hi_category(pk['hi'])[0]} · {pk['hour']:02d}:00"), unsafe_allow_html=True)
-            h2.markdown(factor_tile("Hours in DANGER", f"{sum(1 for f in hplan if f['hi'] >= 41)}", "HI ≥ 41°C citywide"), unsafe_allow_html=True)
-            h3.markdown(factor_tile("Indoors feels like", f"{max(f['hi_indoor'] for f in hplan):.0f}°C",
-                                    "brownout: no fans" if hstory["brownout"] else "with fans running"), unsafe_allow_html=True)
-            h4.markdown(factor_tile("Outdoor-worker stress", f"{hplan[-1]['stress']:.1f} h", "cumulative exposure load"), unsafe_allow_html=True)
+            hs1, hs2, hs3, hs4 = st.tabs(["📋 Protocol board", "🌡️ Scenario films", "🎛️ Build your own heat day",
+                                          "❄️ Cooling register"])
+            with hs1:
+                st.caption("What the next 48 hours demand, by official band — compiled from PAGASA categories, "
+                           "DepEd class rules and DOLE labor guidance (sources listed under each block).")
+                hourly = (live or {}).get("hourly") or {}
+                if "temperature_2m" in hourly and len(hourly.get("temperature_2m") or []):
+                    now_h = pd.Timestamp.now().floor("h")
+                    htimes = pd.to_datetime(hourly["time"])
+                    fmask = np.asarray(htimes >= now_h) & np.asarray(htimes <= now_h + pd.Timedelta(hours=48))
+                    fx, ft, fr = htimes[fmask], np.array(hourly["temperature_2m"])[fmask], np.array(
+                        hourly["relative_humidity_2m"])[fmask]
+                    fhi = [float(dc.hi_c(t, r)) for t, r in zip(ft, fr)]
+                    fhr = [(x - x.floor("D")).total_seconds() / 3600 for x in fx]
+                    st.markdown(f"**Next 48 h at the city centre** — peak **{max(fhi):.0f}°C "
+                                f"({dc.hi_category(max(fhi))[0]})** · computed from the live forecast grid.")
+                    for blk in heat.day_blocks(fhr, fhi):
+                        with st.container(border=True):
+                            st.markdown(f"**{blk['block']}** ({blk['hours']}) · peak **{blk['peak_hi']:.0f}°C** "
+                                        f"<span class='cs-badge' style='background:{blk['color']};color:#fff;'>"
+                                        f"{blk['band']}</span> — {blk['headline']}", unsafe_allow_html=True)
+                            rows = []
+                            for p in heat.protocol_for(blk["peak_hi"]):
+                                for owner, text in p["actions"]:
+                                    rows.append(dict(step=owner, action=text))
+                            st.dataframe(pd.DataFrame(rows).drop_duplicates(), hide_index=True,
+                                         use_container_width=True)
+                            st.caption("Sources: " + " · ".join(
+                                s for p in heat.protocol_for(blk["peak_hi"]) for s in p["sources"])[:220])
+                    rank = heat.hi_hours_by_barangay(L, fhr, fhi)
+                    st.markdown("**Open respite points in these barangays first** (people × DANGER hours, "
+                                "dense cores feel +1–3°C hotter)")
+                    st.dataframe(rank.head(8)[["name", "pop", "danger_h", "people_hours"]]
+                                 .rename(columns={"name": "barangay", "pop": "census",
+                                                  "danger_h": "danger hours (next 48 h)",
+                                                  "people_hours": "people-hours"}),
+                                 hide_index=True, use_container_width=True)
+                else:
+                    st.info("Forecast temperature/humidity not in the current feed — reload after a live fetch.")
+            with hs2:
+                hkeys = list(cinema.HEAT_STORIES.keys())
+                hlabels = {k: cinema.HEAT_STORIES[k]["title"] for k in hkeys}
+                hsel = st.radio("Heat scenario", hkeys, format_func=lambda k: hlabels[k], horizontal=True,
+                                label_visibility="collapsed", key="film_heat")
+                hstory = cinema.HEAT_STORIES[hsel]
+                hc, hm = st.columns([1.25, 1])
+                with hc:
+                    fig_h, hplan = cinema.heat_chart(L, hstory, theme_text=BEIGE_TEXT, grid=PLOT_GRID, height=420)
+                    st.plotly_chart(fig_h, use_container_width=True, config={"displayModeBar": False})
+                    st.caption("Hover a point for the hour's protocol line. Bands = PAGASA heat-index categories.")
+                pk = max(hplan, key=lambda f: f["hi"])
+                with hm:
+                    hh = st.select_slider("Hour", options=[f["hour"] for f in hplan], value=pk["hour"], key="heat_hour",
+                                          format_func=lambda h: f"{h:02d}:00")
+                    fh = next(f for f in hplan if f["hour"] == hh)
+                    pts = cinema.heat_barangay_points(L, fh["hi"])
+                    try:
+                        import folium
+                        from streamlit_folium import st_folium
+                        hmap = folium.Map(location=(16.055, 120.335), zoom_start=12, tiles=None)
+                        folium.TileLayer(tiles=kit.ESRI_GRAY[0], attr=kit.ESRI_GRAY[1]).add_to(hmap)
+                        for pt in pts:
+                            folium.CircleMarker([pt["lat"], pt["lon"]], radius=6 + 10 * (pt["pop"] / 15000), color="white",
+                                                weight=1, fill=True, fill_color=pt["color"], fill_opacity=0.9,
+                                                tooltip=f"{pt['name']} · feels like {pt['hi']:.0f}°C · pop {pt['pop']:,}").add_to(hmap)
+                        st_folium(hmap, height=360, use_container_width=True, returned_objects=[], key="heat_map")
+                    except Exception as e:
+                        st.info(f"Map unavailable ({type(e).__name__}).")
+                    st.caption(f"{hh:02d}:00 · city heat index {fh['hi']:.0f}°C · circles = barangays (size = population, "
+                               "colour = felt heat with urban-heat offset)")
+                h1, h2, h3, h4 = st.columns(4)
+                h1.markdown(factor_tile("Peak heat index", f"{pk['hi']:.0f}°C", f"{dc.hi_category(pk['hi'])[0]} · {pk['hour']:02d}:00"), unsafe_allow_html=True)
+                h2.markdown(factor_tile("Hours in DANGER", f"{sum(1 for f in hplan if f['hi'] >= 41)}", "HI ≥ 41°C citywide"), unsafe_allow_html=True)
+                h3.markdown(factor_tile("Indoors feels like", f"{max(f['hi_indoor'] for f in hplan):.0f}°C",
+                                        "brownout: no fans" if hstory["brownout"] else "with fans running"), unsafe_allow_html=True)
+                h4.markdown(factor_tile("Outdoor-worker stress", f"{hplan[-1]['stress']:.1f} h", "cumulative exposure load"), unsafe_allow_html=True)
+
+            with hs3:
+                st.caption("Familiar dials, new enemy: set a worst day, then read off what the protocols would demand.")
+                d1, d2, d3, d4 = st.columns(4)
+                with d1:
+                    h_tmax = st.slider("Afternoon peak air (°C)", 31, 40, 36, 1, key="hx_tmax")
+                with d2:
+                    h_rh = st.slider("Midday humidity (%RH)", 40, 95, 62, 1, key="hx_rh")
+                with d3:
+                    h_br = st.toggle("Brownout 10:00–16:00", value=True, key="hx_br",
+                                     help="No fans, no cold water — indoor line runs ~3°C hotter than shade.")
+                with d4:
+                    hnight = st.toggle("Tropical night after (min 27°C)", value=True, key="hx_night",
+                                       help="No overnight relief — tomorrow starts hot.")
+                hstory_x = dict(title="Your worst day", tmax=float(h_tmax), tmin=27.0 if hnight else 25.5,
+                                rh_day=float(h_rh), rh_night=80.0, brownout=bool(h_br))
+                figx, planx = cinema.heat_chart(L, hstory_x, theme_text=BEIGE_TEXT, grid=PLOT_GRID, height=360)
+                st.plotly_chart(figx, use_container_width=True, config={"displayModeBar": False})
+                pkx = max(planx, key=lambda f: f["hi"])
+                st.markdown(f"**Peak {pkx['hi']:.0f}°C ({dc.hi_category(pkx['hi'])[0]}) at {pkx['hour']:02d}:00** — "
+                            f"indoors feels {max(f['hi_indoor'] for f in planx):.0f}°C, "
+                            f"outdoor-worker load {planx[-1]['stress']:.1f} h.")
+                for p in heat.protocol_for(pkx["hi"]):
+                    with st.expander(f"{p['band']} — {p['headline']}", expanded=(p['lo'] >= 42)):
+                        for owner, text in p["actions"]:
+                            st.markdown(f"**{owner}:** {text}")
+                        st.caption("Sources: " + " · ".join(p["sources"]))
+
+            with hs4:
+                st.caption("Shaded, ventilated, generator-backed points where people can cool down — registered like "
+                           "shelters, matched by distance. Nothing is pre-filled: the first thing a drill does is "
+                           "register what actually exists.")
+                stt = heat.cooling_stats()
+                cc1, cc2, cc3 = st.columns(3)
+                cc1.metric("Centers open", stt["open"])
+                cc2.metric("Full", stt["full"])
+                cc3.metric("Capacity known", f"{stt['capacity_known']}")
+                if st.button("➕ Register OPEN shelters as cooling points", key="cool_seed",
+                             help="Copies every open shelter into this board once. Cooling status is then managed here."):
+                    n = heat.seed_cooling_from_shelters(L)
+                    st.toast(f"Added {n} cooling point(s)" if n else "Nothing new to register")
+                    st.rerun()
+                ced = st.data_editor(heat.load_cooling(), num_rows="dynamic", hide_index=True,
+                                     use_container_width=True, key="cool_ed",
+                                     column_config={"kind": st.column_config.SelectboxColumn("kind", options=heat.COOL_KINDS),
+                                                    "status": st.column_config.SelectboxColumn("status", options=heat.COOL_STATUS),
+                                                    "center_id": st.column_config.TextColumn(disabled=True),
+                                                    "lat": st.column_config.NumberColumn("latitude", format="%.5f"),
+                                                    "lon": st.column_config.NumberColumn("longitude", format="%.5f"),
+                                                    "updated_at": None})
+                if st.button("💾 Save cooling board", key="save_cool"):
+                    cx = ced.copy()
+                    nums = [int(x[1:]) for x in cx["center_id"].astype(str) if x[:1] == "C" and x[1:].isdigit()]
+                    nx = max(nums, default=0) + 1
+                    for i in cx.index:
+                        if not str(cx.at[i, "center_id"]).strip():
+                            cx.at[i, "center_id"] = f"C{nx:03d}"
+                            nx += 1
+                    empty_rows = cx[cx["name"].astype(str).str.strip() == ""].index
+                    heat.save_cooling(cx.drop(index=empty_rows))
+                    st.toast("Cooling board saved")
+                    st.rerun()
+
 
         with tab_c:
             st.markdown("Set the dials, then watch your own storm play out on the map. Each dial is a real lever or hazard.")
@@ -1530,7 +1634,69 @@ def _fragment_tel():
                 switches to showing both, side by side, with each labeled.
                 """)
 
-    st.subheader("📟 Official sensor network — DOST-ASTI PhilSensors (Pangasinan)")
+    st.subheader("🛰 Nearest station observations — aviation METAR (live, free)")
+    met = gauges.fetch_metar()
+    if (met.get("stations") or [{}])[0].get("temp_c") is None:
+        st.info("aviationweather.gov unreachable right now (" + (met.get("error") or "network") +
+                ") — the model feed above still runs.")
+    else:
+        from zoneinfo import ZoneInfo
+        mcols = st.columns(len(met["stations"]))
+        for mc, s in zip(mcols, met["stations"]):
+            with mc:
+                try:
+                    obs = datetime.fromtimestamp(int(s["obs_time"]), tz=ZoneInfo("Asia/Manila")).strftime("%H:%M PHT")
+                except Exception:
+                    obs = s.get("obs_time", "—")
+                rh = s.get("rh_pct")
+                hi = dc.hi_c(s["temp_c"], rh) if (s.get("temp_c") is not None and rh) else None
+                dmod = None
+                if cur and hi is not None:
+                    dmod = hi - dc.hi_c(cur["temperature_2m"], cur["relative_humidity_2m"])
+                st.markdown(f"**{s['station']}** · {s.get('km_from_dagupan')} km away · obs {obs}")
+                k1, k2, k3 = st.columns(3)
+                k1.metric("Air", f"{s['temp_c']:.0f}°C", f"dew {s.get('dewpoint_c', '—'):.0f}°C" if s.get("dewpoint_c") is not None else None)
+                k2.metric("Feels like", f"{hi:.0f}°C" if hi is not None else "—",
+                          f"{dmod:+.0f}°C vs the model" if dmod is not None else "RH " + (f"{rh:.0f}%" if rh else "—"))
+                k3.metric("Wind", f"{s.get('wind_kt', '—')} kt")
+        st.caption("Real thermometers, wrong addresses: Laoag Intl (≈239 km) and Clark Intl (≈98 km) report every "
+                   "30–60 min with no API key needed — Dagupan itself has no METAR station (Baguio RPUB publishes "
+                   "none either). These sanity-check the model: a 1–3°C gap is normal weather noise, a 6°C+ gap "
+                   "means distrust the model grid until the next fetch.")
+
+    st.subheader("🌊 Upstream dams — Agno system (PAGASA dam table, live)")
+    dams = gauges.fetch_dams()
+    if not dams.get("dams"):
+        st.info("PAGASA flood page unreachable (" + (dams.get("error") or "network") + ") — dam status unknown. "
+                "The table at pagasa.dost.gov.ph/flood is updated around 08:00 daily.")
+    else:
+        st.caption(f"Observed **{dams.get('obs_label') or '—'}** · fetched {dams.get('fetched_at', '—')} · "
+                   "parsed from the public PAGASA flood page; every row cross-checked (RWL − normal-high-water "
+                   "matches the table's own deviation — bad rows are dropped, never shown).")
+        dcols = st.columns(3)
+        for dcol, d in zip(dcols, [x for x in dams["dams"] if x["name"] in gauges.AGNO_DAMS]):
+            over = d["over_nhwl_m"]
+            with dcol:
+                st.metric(f"{d['name']} reservoir", f"{d['rwl_m']:.2f} m",
+                          f"{over:+.2f} m vs normal high water ({d['nhwl_m']:.1f})",
+                          delta_color="inverse" if over > 0 else "normal")
+                st.caption(f"Gates: **{d['gates'] or 'closed / none reported'}**")
+        sr = next((x for x in dams["dams"] if x["name"] == "San Roque"), None)
+        if sr and sr["over_nhwl_m"] > 0 and not sr["gates"]:
+            banner("<b>San Roque is holding a full pool</b> (+%.2f m over normal high water, gates closed). "
+                   "Heavy rain over the Agno basin from here would force releases that become downstream flow "
+                   "toward Dagupan — this is the signal to watch on the Pantal gauge and in PDRRMO bulletins."
+                   % sr["over_nhwl_m"], "warn")
+        b = dams.get("basin") or {}
+        if b.get("status"):
+            col = "#15803d" if b.get("level") == "non-flood" else "#b91c1c"
+            st.markdown(f"<span style='background:{col};color:#fff;padding:4px 12px;border-radius:8px;"
+                        f"font-weight:700;font-size:13px;'>Agno basin: {b['status']}</span> "
+                        f"<span style='color:#6b7280;font-size:12px;'>PAGASA flood status — "
+                        f"[open the basin PDF]({b.get('link')}) for the full bulletin</span>",
+                        unsafe_allow_html=True)
+
+    st.subheader("📟 Station catalogue — DOST-ASTI PhilSensors (archival)")
     ps = gauges.read_cache()
     if ps is None:
         st.info("No station check stored yet. Press **Check the stations now** — the station list is large and the "
@@ -1574,8 +1740,8 @@ def _fragment_tel():
                         'arranged with PDRRMO / DOST-ASTI, use the manual Pantal log below.</div>', unsafe_allow_html=True)
         with st.expander(f"{len(tbl)} nearest stations with readings · checked {ps.get('fetched_at')}"):
             st.dataframe(tbl, hide_index=True, use_container_width=True)
-            st.caption("Source: philsensors.asti.dost.gov.ph public data page. The panel checks only the nearest "
-                       "stations live — the list itself is cached for a week. "
+            st.caption("This is an archive, not a live feed — newest public reading across it is from 2024. "
+                       "Refresh only re-checks whether anything new was published. "
                        "For operational use, request official access: philsensors.asti.dost.gov.ph/datarequest/terms")
         if errs:
             st.caption(f"{len(errs)} station(s) skipped this check "
@@ -1926,6 +2092,16 @@ def _fragment_wlk():
             if heat_now:
                 m2.metric("Heat index NOW", f"{dc.hi_c(cur['temperature_2m'], cur['relative_humidity_2m']):.0f}°C",
                           dc.hi_category(HI)[0], delta_color="inverse")
+                hp = heat.protocol_for(HI)[-1]
+                st.markdown(f"**Today's call ({hp['band']}):** {hp['headline']}  \n"
+                            + "  \n".join(f"· **{o}:** {t}" for o, t in hp["actions"][:2]),
+                            unsafe_allow_html=True)
+                if anchor:
+                    nc = heat.nearest_cooling(L, anchor["lat"], anchor["lon"])
+                    st.caption("Nearest open relief: **%s**%s" % (
+                        nc["name"][:40] if nc else "none registered",
+                        f" · {nc['distance_m'] / 1000:.1f} km" if nc else
+                        " — register one in the Deck's ❄️ Cooling register"))
             elif anchor:
                 sp = ops.shelter_with_space(L, anchor["lat"], anchor["lon"], W_c, people=int(row["popn"]) // 100 or 1)
                 m2.metric("Nearest shelter with space", (sp["name"][:34] if sp else "none OPEN with space"),
@@ -2072,10 +2248,11 @@ def _fragment_exercise():
                     st.download_button("⬇ Download this debrief (PNG)", data=png,
                                         file_name=f"debrief_{state.get('team', 'team').replace(' ', '_')}.png",
                                         mime="image/png", use_container_width=True)
-                    st.caption("Debrief reading: the blue curve is the storm; ▽ marks each text you turned into a "
-                               "request, ● a unit assignment, ★ everyone delivered. Dotted red lines are the "
-                               "complications as they hit — the distance between a line and the next ● is your "
-                               "reaction time.")
+                    st.caption("Debrief reading: the blue curve is the storm water level over the run; "
+                               "each ▽ marks a help text turned into a request, each ● a unit assignment, each ★ "
+                               "everyone in that request delivered; red dotted lines are the complications as they "
+                               "hit, labeled E1–E9 with the storm hour — the distance between a line and the next ● "
+                               "is your reaction time.")
                 except Exception as e:
                     st.info(f"Debrief chart unavailable ({type(e).__name__}).")
             hist = exercise.history_summary()
@@ -2249,7 +2426,8 @@ def _fragment_response():
     k[5].metric("Units available", f"{int((res['status'] == 'available').sum()) if len(res) else 0}",
                 f"of {len(res)} registered")
 
-    tabs = st.tabs(["🚨 Requests & dispatch", "📱 Messages (simulated)", "🏠 Shelters", "🚤 Resources", "📍 Nearest services", "📒 Directory"])
+    tabs = st.tabs(["🚨 Requests & dispatch", "📱 Messages (simulated)", "🏠 Shelters", "🚤 Resources",
+                    "❄️ Cooling", "📍 Nearest services", "📒 Directory"])
 
     # ================================================================ requests
     with tabs[0]:
@@ -2581,13 +2759,16 @@ def _fragment_response():
                     "timed exercise these units travel at the speeds below and carry the listed capacity per trip.")
         rs = ops.load_resources()
         phy = pd.DataFrame([dict(unit_type=t, **{"speed km/h": p["speed_kmh"], "carries/trip": p["capacity"],
-                                                 "max water at request (m)": p.get("max_water_m") or "— any (boat)"})
+                                                 "max water at request (m)": (p["max_water_m"]
+                                                                              if p.get("max_water_m") is not None
+                                                                              else float("nan"))})
                             for t, p in ops.UNIT_PHYSICS.items()])
         with st.expander("📐 Unit physics used by the simulator"):
             st.dataframe(phy, hide_index=True, use_container_width=True)
             st.caption("Practice values, clearly not engineering data: straight-line distance ÷ speed gives the ETA; "
-                       "vehicles refuse requests deeper than their max water; support units (carries 0) make one "
-                       "delivery round trip. Real speeds depend on debris, current and road state.")
+                       "vehicles refuse requests deeper than their max water (blank = boats, any water); "
+                       "support units (carries 0) make one delivery round trip. Real speeds depend on debris, "
+                       "current and road state.")
         ustat = ex_state.get("unit_stats") or {}
         if ustat:
             stat_df = pd.DataFrame([dict(unit=u, trips=s.get("trips", 0), people=s.get("people", 0))
@@ -2619,8 +2800,59 @@ def _fragment_response():
             st.toast("Resources saved")
             st.rerun()
 
-    # ================================================================ nearest services
+    # ================================================================ cooling (heat relief points)
     with tabs[4]:
+        st.markdown("**Cooling centers** — where the hot go when shade is not enough. Managed like the "
+                    "shelter board; the Deck's cooling register edits the same list.")
+        cst = heat.cooling_stats()
+        q1, q2, q3 = st.columns(3)
+        q1.metric("Open", cst["open"])
+        q2.metric("Full", cst["full"])
+        q3.metric("Capacity known", cst["capacity_known"])
+        cl1, cl2 = st.columns([1.5, 1])
+        with cl1:
+            nb2 = st.selectbox("Find relief for", sorted(L.brgy["barangay"].tolist()),
+                               index=sorted(L.brgy["barangay"].tolist()).index("Pantal"), key="cool_near_b")
+            a2 = _anchor(nb2)
+            if a2 is None:
+                st.info("No anchor for this barangay.")
+            else:
+                nc = heat.nearest_cooling(L, a2["lat"], a2["lon"])
+                if nc is None:
+                    st.warning("No cooling center registered — register one in the Deck's ❄️ Cooling register "
+                               "or add a row below (status = open).")
+                else:
+                    full2 = nc["free"] is not None and nc["free"] <= 0
+                    st.metric("Nearest open relief", nc["name"][:40],
+                              f"{'FULL — next closest?' if full2 else str(nc['free']) + ' free' if nc['free'] is not None else 'space unknown'} · {nc['distance_m'] / 1000:.1f} km")
+        with cl2:
+            st.caption(f"Board: {cst['open']} open · {cst['full']} full · {cst['closed']} closed "
+                       "(same list as the Deck). Edit rows here or there — it is one table.")
+        ced2 = st.data_editor(heat.load_cooling(), num_rows="dynamic", hide_index=True, use_container_width=True,
+                              key="cool_ed2",
+                              column_config={"kind": st.column_config.SelectboxColumn("kind", options=heat.COOL_KINDS),
+                                             "status": st.column_config.SelectboxColumn("status", options=heat.COOL_STATUS),
+                                             "center_id": st.column_config.TextColumn(disabled=True),
+                                             "lat": st.column_config.NumberColumn("latitude", format="%.5f"),
+                                             "lon": st.column_config.NumberColumn("longitude", format="%.5f"),
+                                             "updated_at": None})
+        if st.button("💾 Save cooling centers", key="save_cool2"):
+            cx = ced2.copy()
+            cx = cx[cx["name"].astype(str).str.strip() != ""]
+            nums = [int(x[1:]) for x in cx["center_id"].astype(str) if x[:1] == "C" and x[1:].isdigit()]
+            nx = max(nums, default=0) + 1
+            for i in cx.index:
+                if not str(cx.at[i, "center_id"]).strip():
+                    cx.at[i, "center_id"] = f"C{nx:03d}"
+                    nx += 1
+                if not str(cx.at[i, "status"]).strip():
+                    cx.at[i, "status"] = "closed"
+            heat.save_cooling(cx)
+            st.toast("Cooling board saved")
+            st.rerun()
+
+    # ================================================================ nearest services
+    with tabs[5]:
         nb_list = sorted(L.brgy["barangay"].tolist())
         nb = st.selectbox("Community", nb_list, index=nb_list.index("Pantal"), key="near_b")
         a = _anchor(nb)
@@ -2664,7 +2896,7 @@ def _fragment_response():
             st.caption("Straight-line distances; 'state' = flood depth at the facility at this water level.")
 
     # ================================================================ directory
-    with tabs[5]:
+    with tabs[6]:
         st.markdown('<div class="cs-banner"><b>Reference only.</b> Public emergency numbers as published on the official '
                     'City Government of Dagupan website (source column). The simulator never calls or texts them — in a '
                     'real emergency, call these offices directly or <b>911</b>. Landlines use area code (075).</div>',
@@ -2702,6 +2934,9 @@ def _fragment_methods():
                     | 45-year climate & heat index | NASA POWER (MERRA-2) + ECMWF ERA5 cross-check | open / CC-BY 4.0 |
                     | Live conditions | Open-Meteo real-time API (fallback: MET Norway) | CC-BY 4.0 |
                     | Hourly rain (past 24 h + 7-day) | Open-Meteo | CC-BY 4.0 |
+                    | Nearest station observations | aviationweather.gov METAR, Laoag RPLI + Clark RPLC (no Dagupan METAR station exists) | US public domain |
+                    | Agno dam levels + basin status | PAGASA public flood page (parsed table, row arithmetic cross-checked) | PH public domain |
+                    | Heat protocol rules | PAGASA bands; DepEd Order No. 37, s. 2022; DepEd 4 Apr 2024 ADM statement; DRAFT 2026 ≥40°C auto-suspension proposal (not policy); DOLE Labor Advisory No. 08, s. 2023 | PH public domain |
                     """
             )
         with st.expander("Model validation — Aug 2026 habagat vs CDRRMO SitRep No. 15", expanded=False):

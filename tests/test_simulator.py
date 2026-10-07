@@ -24,7 +24,10 @@ def test_deck_scenario_tabs_and_controls():
 def test_deck_replay_tab():
     at = boot()
     no_exc(at)
-    assert len(at.tabs) == 4
+    labels = [getattr(t, "label", "") for t in at.tabs]
+    for want in ("🌊 Flood scenarios", "🔥 Heat scenarios", "🎛️ Build your own storm", "🌩 Real storm replays",
+                 "📋 Protocol board", "❄️ Cooling register"):
+        assert want in labels, f"deck tab {want!r} missing"
     ev = next(s for s in at.selectbox if s.key == "rp_ev")
     ev.set_value("pepeng_2009"); at.run(); no_exc(at)
     rd = next(s for s in at.radio if s.key == "rp_rd")

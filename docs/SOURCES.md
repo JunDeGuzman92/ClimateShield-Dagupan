@@ -64,9 +64,24 @@ All datasets, agency products, news reports, and scientific papers used or cited
 - Active-land footprint: OSM land-use polygons ∪ building footprints ∪ WorldPop occupancy, within the OSM city polygon (which extends into gulf municipal waters); validated at 33.8 km² = 76% of the official 44.47 km² land area.
 - Exposure arithmetic: zonal sums on the WorldPop native 100 m grid (nearest-resampled zone ids); PSA census totals are the authoritative population counts.
 
+
 ## 7. Known limitations (summary — full discussion in notebook §13)
 
 - Reanalysis grids (°9–60 km) smooth station-point extremes; operational app must ingest PAGASA synoptic-station feeds.
 - GLO-30 is a **surface** model (rooftop/canopy bias documented); band shares are planning-grade.
-- Barangay polygons are not published openly for Dagupan (checked: OSM subareas, OCHA COD-AB, geoBoundaries ADM4 → 404, GADM L4 → 404); barangay analysis uses PSA census + OSM neighborhood anchors (28/31 matched) until LGU/CBMS partnership unlocks boundaries.
+- Barangay polygons are not published openly for Dagupan (checked: OSM subareas, OCHA COD-AB, geoBoundaries ADM4 → 404, GADM L4 → 404); barangay analysis uses PSA census + 30/31 OSM anchors and interim anchor-Voronoi neighborhoods labeled DERIVED until the LGU boundary file arrives.
 - Annual-scale ML models have weak held-out skill (reported honestly in-notebook); used as labeled planning heuristics only.
+
+## 8. Operational sources (app runtime — checked 7 Oct 2026)
+
+| Source | Product used | Access |
+|---|---|---|
+| Open-Meteo forecast API | Current + hourly temperature/humidity/rain at 16.0432°N 120.3342°E (model grid, primary live feed) | CC-BY 4.0 · https://api.open-meteo.com/ |
+| MET Norway Locationforecast | Rain fallback when Open-Meteo is unreachable (rain only, no temperature/RH) | open data · https://api.met.no/ |
+| aviationweather.gov METAR | Nearest real station observations: Laoag Intl RPLI (~239 km), Clark Intl RPLC (~98 km); Dagupan and Baguio publish no METAR | US public domain · https://aviationweather.gov/api/data/metar |
+| PAGASA dam table (`/flood` page) | Ambuklao/Binga/San Roque reservoir vs normal-high-water readings + Agno basin watch status (parsed, row arithmetic cross-checked) | PH public domain · https://www.pagasa.dost.gov.ph/flood |
+| DOST-ASTI PhilSensors public page | Station catalogue only — archival (newest Pangasinan public reading Feb 2024, none inside Dagupan) | https://philsensors.asti.dost.gov.ph/ |
+| DepEd Order No. 37, s. 2022 | Class/work suspension rules for disasters and calamities (authority behind school actions) | Public issuance |
+| DepEd statement, 4 Apr 2024 | School heads may suspend face-to-face classes and shift to ADM in extreme heat | https://www.deped.gov.ph/2024/04/04/on-class-suspensions-and-shifting-to-adm-due-to-high-heat-index-other-calamities |
+| Draft 2026 automatic-suspension proposal (≥40°C) | Reported Jul 2026, **not policy** — shown in the app flagged as draft | Reported by GMA News, 29 Jul 2026 |
+| DOLE Labor Advisory No. 08, s. 2023 | Heat-stress prevention: risk/comorbidity assessment, rest breaks, uniforms/PPE, ≥2–3 L water, info campaigns, emergency procedures, flexible hours | https://bwc.dole.gov.ph/wp-content/uploads/2024/06/LA-08-23-Safety-and-Health-Measures-to-Prevent-and-Control-Heat-Stress-at-the-Workplace.pdf |
