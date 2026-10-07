@@ -1,10 +1,10 @@
 CELLS_P2 = []
 
-CELLS_P2.append(("md", """## 2. Extreme rainfall — the flood driver (1981–2026)
+CELLS_P2.append(("md", """## 2. Extreme rainfall, the flood driver (1981–2026)
 
-Dagupan's floods are overwhelmingly **rain-driven**: habagat cloudbands, typhoons, and organized convection dump extraordinary volumes on an already tide-locked, subsided, low-gradient delta city. We quantify the changing frequency of heavy and intense daily rainfall (analytical thresholds set at **≥50 mm/day** = heavy, **≥100 mm/day** = intense, consistent with PAGASA rainfall intensity descriptors), plus multi-day storm volumes (3-day and 7-day maxima) that matter when the Pantal-Calmay system backs up at high tide.
+Dagupan's floods are overwhelmingly **rain-driven**: habagat cloudbands, typhoons, and organized convection dump extraordinary volumes on an already tide-locked, subsided, low-gradient delta city. We quantify the changing frequency of heavy and intense daily rainfall (thresholds set at ≥50 mm/day for heavy and ≥100 mm/day for intense, consistent with PAGASA rainfall intensity descriptors), plus multi-day storm volumes (3-day and 7-day maxima) that matter when the Pantal-Calmay system backs up at high tide.
 
-Each metric gets a trend test (Kendall's tau, with OLS slope) — the same statistical honesty the original ClimateShield pipeline applied to Durham's heat days."""))
+Each metric gets a trend test (Kendall's tau, with OLS slope), the same statistical honesty the original ClimateShield pipeline applied to Durham's heat days."""))
 
 CELLS_P2.append(("code", """annual = pd.DataFrame(index=sorted(df["YEAR"].unique()))
 annual["RAIN_ANN"] = df.groupby("YEAR")["RAIN"].sum()
@@ -73,10 +73,10 @@ CELLS_P2.append(("md", """## 3. Seasonality: habagat concentration & dry-season 
 
 Dagupan's climate (Type I, *Am*) splits the year into two operational regimes:
 
-- **Wet / flood regime (May–Oct, peaking Jul–Aug)** — habagat + typhoon season; the months that produced the Aug 2026 calamity
-- **Dry / heat regime (Nov–Apr, peaking Apr–May)** — El Niño-amplified heat-index season, when the 51°C records are set
+- Wet / flood regime (May–Oct, peaking Jul–Aug): habagat + typhoon season, the months that produced the Aug 2026 calamity
+- Dry / heat regime (Nov–Apr, peaking Apr–May): El Niño-amplified heat-index season, when the 51°C records are set
 
-We track (a) the **share of annual rainfall falling in Jun–Oct**, (b) **dry-spell lengths** (longest run of days with < 1 mm — a proxy for drought/aquaculture stress in the bangus farm belt), and (c) **off-season heavy rain** — surprise events that catch communities unprepared during the nominal dry months."""))
+We track (a) the share of annual rainfall falling in Jun–Oct, (b) dry-spell lengths (the longest run of days with < 1 mm, a proxy for drought and aquaculture stress in the bangus farm belt), and (c) off-season heavy rain: surprise events that catch communities unprepared during the nominal dry months."""))
 
 CELLS_P2.append(("code", """wet_share = (df[df["MONTH"].between(6, 10)].groupby("YEAR")["RAIN"].sum() / annual["RAIN_ANN"]).dropna()
 
@@ -117,9 +117,9 @@ print(f"Off-season (Nov-May) heavy-rain days 1981-2026: {off_annual.sum():.0f} t
 
 CELLS_P2.append(("md", """## 4. Heat: how dangerous has Dagupan's heat index become?
 
-PAGASA's official national heat-index categories: **Caution 27–32°C · Extreme Caution 33–41°C · Danger 42–51°C · Extreme Danger ≥52°C**. The Danger band is where heat cramps → heat exhaustion → heat stroke become probable with continued exposure.
+PAGASA's official national heat-index categories: **Caution 27–32°C · Extreme Caution 33–41°C · Danger 42–51°C · Extreme Danger ≥52°C**. The Danger band is where heat cramps, heat exhaustion and heat stroke become probable with continued exposure.
 
-**Method:** daily heat index via the **Rothfusz regression** (the NWS formula underlying PAGASA heat-index guidance) computed from **daily maximum temperature × daily mean relative humidity** (NASA POWER). This correlates with, but can smooth, 2pm synoptic-station observations — the **Apr 28, 2024 record (51°C station heat index, per PAGASA/INQUIRER.net)** is used as an anchor event (validated below). Days are counted by their worst-case category."""))
+Method: daily heat index via the Rothfusz regression (the NWS formula underlying PAGASA heat-index guidance), computed from daily maximum temperature × daily mean relative humidity (NASA POWER). This correlates with, but can smooth, 2pm synoptic-station observations; the Apr 28, 2024 record (51°C station heat index, per PAGASA/INQUIRER.net) is used as an anchor event (validated below). Days are counted by their worst-case category."""))
 
 CELLS_P2.append(("code", """df["HI"] = rothfusz_hi_c(df["T2M_MAX"].values, df["RH2M"].values)
 df["HI_CAT"] = df["HI"].map(hi_category)
@@ -241,20 +241,20 @@ plt.close(fig)"""))
 
 CELLS_P2.append(("md", """## 4.2 Early-warning triggers aligned to official PAGASA categories
 
-ClimateShield uses **only official classification systems** as alert triggers — the platform's job is to translate them into community action *earlier and faster*, not to invent rival science.
+Alert triggers use only official classification systems. ClimateShield's job is to translate them into community action earlier and faster, not to invent rival science.
 
 **PAGASA official flood advisory classes** (Rainfall Warning System; river-stage basis for telemetered basins):
 
 | PAGASA level | Official meaning | ClimateShield community trigger |
 |---|---|---|
-| **Flood Monitoring / Advisory** | "Flooding is **possible** in low-lying areas and near river channels" (Pantal River stage also monitored toward Alert = 40% channel capacity) | Pre-position banca/rescue rosters; charge lights & phones; clear drainage inlets; call elderly/needy list |
-| **Flood Alert** | "Flooding is **threatening**" — preparedness phase (moderate-heavy rainfall) | Move vehicles & bangus harvest to high ground; voluntary evacuation of subsided-zone households; school pickup protocol |
-| **Flood Warning / Emergency** | "Flood is **occurring** — immediate action recommended / severe flooding expected" | Mandatory evacuation to designated centers; banca taxi operations; crowd-sourced depth layer activates |
-| **Severe Flooding** | "Flood is **persisting** — forced evacuation recommended" | Full city-wide response; mutual-aid network activates |
+| Flood Monitoring / Advisory | "Flooding is **possible** in low-lying areas and near river channels" (Pantal River stage also monitored toward Alert = 40% channel capacity) | Pre-position banca/rescue rosters; charge lights & phones; clear drainage inlets; call elderly/needy list |
+| Flood Alert | "Flooding is **threatening**"; preparedness phase (moderate-heavy rainfall) | Move vehicles & bangus harvest to high ground; voluntary evacuation of subsided-zone households; school pickup protocol |
+| Flood Warning / Emergency | "Flood is **occurring** — immediate action recommended / severe flooding expected" | Mandatory evacuation to designated centers; banca taxi operations; crowd-sourced depth layer activates |
+| Severe Flooding | "Flood is **persisting** — forced evacuation recommended" | Full city-wide response; mutual-aid network activates |
 
-**PAGASA heat-index categories** (Caution / Extreme Caution / Danger / Extreme Danger) come with official health guidance — at Danger: move to shade, elevate legs, sip cool water, apply cool water + ice packs to armpits-wrists-ankles-groin, and hospital transport for suspected heat stroke. ClimateShield turns each band into barangay-level action sets, alert-copy templates, and school/work scheduling rules.
+**PAGASA heat-index categories** (Caution / Extreme Caution / Danger / Extreme Danger) come with official health guidance. At Danger: move to shade, elevate legs, sip cool water, apply cool water + ice packs to armpits-wrists-ankles-groin, and hospital transport for suspected heat stroke. ClimateShield turns each band into barangay-level action sets, alert-copy templates, and school/work scheduling rules.
 
-**Readiness calendar** — 45 years of data distilled into the expected red-flag days per month, so preparedness budgets and drills land *before* the season that needs them."""))
+**Readiness calendar**: 45 years of data distilled into the expected red-flag days per month, so preparedness budgets and drills land *before* the season that needs them."""))
 
 CELLS_P2.append(("code", """rain_monthly = df[df["RAIN"] >= 50].groupby("MONTH").size() / 45.7
 hi_monthly = df[df["HI"] >= 42].groupby("MONTH").size() / 45.7

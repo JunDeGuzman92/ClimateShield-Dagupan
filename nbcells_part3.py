@@ -2,17 +2,17 @@ CELLS_P3 = []
 
 CELLS_P3.append(("md", """## 5. Terrain and flood susceptibility (satellite geomapping)
 
-Dagupan is famously one of the Philippines' lowest-lying cities. After the 1990 earthquake dropped parts of the downtown below sea level (Ishihara et al. 1993), every heavy-rain event contends with a **gravity problem**: water that arrives faster than a near-flat, tide-influenced delta can drain it.
+Dagupan is famously one of the Philippines' lowest-lying cities. After the 1990 earthquake dropped parts of the downtown below sea level (Ishihara et al. 1993), every heavy-rain event contends with a gravity problem: water that arrives faster than a near-flat, tide-influenced delta can drain it.
 
-**Method (fully transparent proxy, not a hydraulic model):**
+Method (a fully transparent proxy, not a hydraulic model):
 
-1. **Elevation** — Copernicus GLO-30 (30 m digital surface model, ESA). Heights are calibrated in-notebook against the Lingayen Gulf sea surface; the city is masked by its official boundary (OSM).
-2. **Proximity to waterways** — every OSM river/canal/ditch/drain segment is rasterized; Euclidean distance computed per cell.
-3. **Proximity to coast** — same, using the OSM coastline of Lingayen Gulf.
-4. **Flatness (local relief)** — surface slope; Dagupan's ponding zones are the flattest ground in the flattest city.
-5. **Weighted composite:** elevation 45% + river proximity 25% + coastal proximity 15% + flatness 15% → *ClimateShield Flood-Susceptibility Index* (0–100, city-normalized).
+1. Elevation: Copernicus GLO-30 (30 m digital surface model, ESA). Heights are calibrated in-notebook against the Lingayen Gulf sea surface; the city is masked by its official boundary (OSM).
+2. Proximity to waterways: every OSM river/canal/ditch/drain segment is rasterized; Euclidean distance computed per cell.
+3. Proximity to coast: same, using the OSM coastline of Lingayen Gulf.
+4. Flatness (local relief): surface slope; Dagupan's ponding zones are the flattest ground in the flattest city.
+5. Weighted composite: elevation 45% + river proximity 25% + coastal proximity 15% + flatness 15% = the *ClimateShield Flood-Susceptibility Index* (0–100, city-normalized).
 
-Caveats printed and respected: GLO-30 is a **surface** model (rooftops read ~2–5 m above ground in dense construction); distances are Euclidean, not flow-path; pumping and drainage-line capacity are not modeled. This is a **community-planning susceptibility surface** — complementary to (never a substitute for) official DOST-PAGASA / DPWH flood-hazard maps."""))
+Caveats printed and respected: GLO-30 is a surface model (rooftops read ~2–5 m above ground in dense construction); distances are Euclidean, not flow-path; pumping and drainage-line capacity are not modeled. This is a community-planning susceptibility surface, complementary to (never a substitute for) official DOST-PAGASA / DPWH flood-hazard maps."""))
 
 CELLS_P3.append(("code", """import geopandas as gpd
 import rasterio

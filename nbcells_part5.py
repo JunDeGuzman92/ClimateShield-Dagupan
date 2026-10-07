@@ -4,12 +4,12 @@ CELLS_P5.append(("md", """## 7. Critical infrastructure on the susceptibility su
 
 From the OSM extract we classify the assets a community depends on during disasters:
 
-- **Schools** (119 amenity nodes/ways + school-type buildings) — also the default evacuation centers (as used in the Aug 2026 response, when 6 centers sheltered 65 preemptively-evacuated families)
-- **Health** — hospitals, clinics, health posts, pharmacies
-- **Civic & protective** — town/barangay halls, police, fire, shelters, childcare
-- **Places of worship** — historically the first ad-hoc shelters in Philippine flood response
+- Schools (119 amenity nodes/ways + school-type buildings): also the default evacuation centers, as used in the Aug 2026 response, when 6 centers sheltered 65 preemptively-evacuated families
+- Health: hospitals, clinics, health posts, pharmacies
+- Civic & protective: town/barangay halls, police, fire, shelters, childcare
+- Places of worship: historically the first ad-hoc shelters in Philippine flood response
 
-Each facility is geolocated on the susceptibility surface and scored; evacuation-relevant assets standing in high-susceptibility ground are flagged — they cannot be relied on as shelters, and residents near them need alternates."""))
+Each facility is geolocated on the susceptibility surface and scored; evacuation-relevant assets standing in high-susceptibility ground are flagged. They cannot be relied on as shelters, and residents near them need alternates."""))
 
 CELLS_P5.append(("code", """FAC_SETS = {
     "school": {"school", "kindergarten", "college", "university"},
@@ -63,13 +63,13 @@ plt.close(fig)"""))
 
 CELLS_P5.append(("md", """## 8. Barangay risk watchlist (the app's first screen)
 
-**Method, matched to what openly exists:** barangay polygons are not published openly for Dagupan (OSM, OCHA COD-AB, geoBoundaries and GADM all stop at municipality level), so ClimateShield builds each barangay's spatial profile from:
+Method, matched to what openly exists: barangay polygons are not published openly for Dagupan (OSM, OCHA COD-AB, geoBoundaries and GADM all stop at municipality level), so ClimateShield builds each barangay's spatial profile from:
 
-1. **Official PSA census** — population & urban/rural (all 31 barangays)
-2. **OSM neighborhood anchors** — place nodes whose names match barangay names ( quarters/villages; e.g., *Pantal*, *Carael*, *Calmay*, *Bonuan Gueset*)
-3. For matched anchors — the mean susceptibility within 300 m, elevation, distance to rivers/coast, and surrounding built-up density (an urban-heat proxy), all sampled from the rasters above
+1. Official PSA census: population & urban/rural (all 31 barangays)
+2. OSM neighborhood anchors: place nodes whose names match barangay names (quarters/villages; e.g., *Pantal*, *Carael*, *Calmay*, *Bonuan Gueset*)
+3. For matched anchors: the mean susceptibility within 300 m, elevation, distance to rivers/coast, and surrounding built-up density (an urban-heat proxy), all sampled from the rasters above
 
-**ClimateShield Risk Index (CSRI, 0–100)** — transparent percentile blend: 50% flood susceptibility + 25% population share + 15% building density (UHI/evacuation-cost proxy) + 10% urban status. Barangays without an anchor are listed with census data only (`geometry anchor: none`) — honesty first."""))
+ClimateShield Risk Index (CSRI, 0–100), a transparent percentile blend: 50% flood susceptibility + 25% population share + 15% building density (UHI/evacuation-cost proxy) + 10% urban status. Barangays without an anchor are listed with census data only (`geometry anchor: none`). Honesty first."""))
 
 CELLS_P5.append(("code", """def norm_name(s):
     s = str(s).lower().strip()
@@ -159,14 +159,14 @@ print(", ".join(wl_out[wl_out['CSRI'].isna()]['barangay']))"""))
 
 CELLS_P5.append(("md", """## 9. Compact models (in the spirit of the original ClimateShield pipeline)
 
-The original Durham pipeline shipped 4 models (heat projection, flood frequency, hospitalisation risk, response-time deterioration). This Dagupan edition ships the same *pattern*, sized to what 45 years of one city's data honestly supports — with cross-validated skill reported, **including when it is weak** (model honesty > model theater):
+The original Durham pipeline shipped 4 models (heat projection, flood frequency, hospitalisation risk, response-time deterioration). This Dagupan edition ships the same *pattern*, sized to what 45 years of one city's data honestly supports. Cross-validated skill is reported even when it is weak (model honesty over model theater):
 
 | # | Model | Task | Method |
 |---|---|---|---|
-| 1 | **Heat-day projection** | Annual PAGASA-Danger heat-index days | Polynomial (deg 2) + linear, held-out test on 2016–2026, forecast to 2040 |
-| 2 | **Heat-day composite predictor** | Same target | Random Forest with climate features, TimeSeriesSplit CV |
-| 3 | **Community risk typology** | Segment the city into response-planning profiles | K-Means on terrain × water-proximity × relief per 30 m cell |
-| 4 | **Evacuation accessibility** | Where are residents far from any shelter-worthy facility? | Euclidean accessibility surface from facility raster (EDT)"""))
+| 1 | Heat-day projection | Annual PAGASA-Danger heat-index days | Polynomial (deg 2) + linear, held-out test on 2016–2026, forecast to 2040 |
+| 2 | Heat-day composite predictor | Same target | Random Forest with climate features, TimeSeriesSplit CV |
+| 3 | Community risk typology | Segment the city into response-planning profiles | K-Means on terrain × water-proximity × relief per 30 m cell |
+| 4 | Evacuation accessibility | Where are residents far from any shelter-worthy facility? | Euclidean accessibility surface from facility raster (EDT)"""))
 
 CELLS_P5.append(("code", """from sklearn.ensemble import RandomForestRegressor
 from sklearn.cluster import KMeans
@@ -319,9 +319,9 @@ fig.suptitle("Where response planning needs to concentrate", y=1.0)
 save_chart(fig, "16_typology_accessibility.png")
 plt.close(fig)"""))
 
-CELLS_P5.append(("md", """## 10. The ClimateShield-Dagupan command center (BI platform blueprint)
+CELLS_P5.append(("md", """## 10. The ClimateShield-Dagupan command center (app blueprint)
 
-The notebook is the analytical engine; the **platform** is how a barangay captain, a tricycle cooperative, or a fishpen owner actually uses it.
+The notebook produces the numbers; the app is how a barangay captain, a tricycle cooperative, or a fishpen owner actually uses them.
 
 ```
 +-------------------------------+     +-----------------------------+     +--------------------------+
@@ -339,18 +339,18 @@ The notebook is the analytical engine; the **platform** is how a barangay captai
 +-------------------------------+     +-----------------------------+     +--------------------------+
 ```
 
-**Product phases**
+Product phases
 
 | Phase | Scope | Notes |
 |---|---|---|
-| **P1 — Alert translations (weeks)** | PAGASA bulletins -> barangay-level plain-language actions (the trigger table in §4.2) | Zero new data needed; official categories only |
-| **P2 — Local observability (months)** | Crowd depth reports + banca/road state + rain-gauge pooling; maps from this notebook as the base layer | The `projectligtas.com` live-flood-monitoring model proves demand; ClimateShield adds community operations |
-| **P3 — Prepositioned operations** | Watchlists (§8), typology segments (§9), school-shelter registries, drill scheduling on the readiness calendar (§4.2) | Direct LGU/CDRRMO partnership; barangay boundaries from the LGU unlock full-resolution geo-targeting |
-| **P4 — Anticipatory action** | Model-driven pre-positioning (bangus harvest lifts at Flood-Alert; water stations open at heat-Danger) | Requires phases 1-3 to be trusted first |
+| P1, alert translations (weeks) | PAGASA bulletins -> barangay-level plain-language actions (the trigger table in §4.2) | Zero new data needed; official categories only |
+| P2, local observability (months) | Crowd depth reports + banca/road state + rain-gauge pooling; maps from this notebook as the base layer | The `projectligtas.com` live-flood-monitoring model proves demand; ClimateShield adds community operations |
+| P3, prepositioned operations | Watchlists (§8), typology segments (§9), school-shelter registries, drill scheduling on the readiness calendar (§4.2) | Direct LGU/CDRRMO partnership; barangay boundaries from the LGU unlock full-resolution geo-targeting |
+| P4, anticipatory action | Model-driven pre-positioning (bangus harvest lifts at Flood-Alert; water stations open at heat-Danger) | Requires phases 1-3 to be trusted first |
 
-**Design principles**
+Design principles
 
-1. **Official categories only for triggers** — PAGASA classes, DOST advisories; ClimateShield *translates*, never competes.
-2. **Work with or without government aid** — every playbook has a "no external response expected" variant: banca cooperatives as the rescue fleet, sari-sari water points as cooling stations, church/school shelter rosters.
-3. **Offline-first** — the Aug 2026 and Jul 2024 events both hit power/connectivity; SMS idioms and printed barangay cards are first-class features.
-4. **Data dignity** — crowd reports are OSI-style anonymous observations, never surveillance; PSA/Kontur/WorldPop datasets used under their licenses (CC-BY/ODbL), attributed everywhere."""))
+1. Official categories only for triggers: PAGASA classes, DOST advisories; ClimateShield *translates*, never competes.
+2. Work with or without government aid: every playbook has a "no external response expected" variant, with banca cooperatives as the rescue fleet, sari-sari water points as cooling stations, and church/school shelter rosters.
+3. Offline-first: the Aug 2026 and Jul 2024 events both hit power and connectivity; SMS idioms and printed barangay cards are first-class features.
+4. Data dignity: crowd reports are OSI-style anonymous observations, never surveillance; PSA/Kontur/WorldPop datasets are used under their licenses (CC-BY/ODbL), attributed everywhere."""))

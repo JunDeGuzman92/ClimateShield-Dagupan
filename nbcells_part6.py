@@ -2,7 +2,7 @@ CELLS_P6 = []
 
 CELLS_P6.append(("md", """## 11. The one-screen ClimateShield dashboard
 
-The composite every command-center TV screen shows — climate pressure, terrain reality, population exposure, and the seasonal clock in a single frame (the direct descendant of the original Durham pipeline's Chart 09)."""))
+The composite every command-center TV screen shows: climate pressure, terrain reality, population exposure, and the seasonal clock in a single frame (a direct descendant of the original Durham pipeline's Chart 09)."""))
 
 CELLS_P6.append(("code", """fig, axes = plt.subplots(2, 3, figsize=(19.5, 10.2))
 
@@ -57,7 +57,7 @@ plt.close(fig)"""))
 
 CELLS_P6.append(("md", """## 12. Interactive geo-map (for the app's map screen)
 
-The static rasters above become a browsable product layer: city boundary, hydrology, coastline, every shelter-relevant facility, and the susceptibility surface — saved as standalone HTML to `outputs/maps/`, openable by any barangay laptop or phone browser, no GIS required."""))
+The static rasters above become a browsable product layer: city boundary, hydrology, coastline, every shelter-relevant facility, and the susceptibility surface, saved as standalone HTML to `outputs/maps/`; it opens in any barangay laptop or phone browser, no GIS required."""))
 
 CELLS_P6.append(("code", """import folium
 from folium.plugins import Fullscreen
@@ -154,16 +154,16 @@ m"""))
 
 CELLS_P6.append(("md", """## 13. Limitations, ethics, and what the app phase must add
 
-**What this analysis is — and is not**
+What this analysis is, and is not:
 
-1. **Reanalysis ≠ station records.** NASA POWER (MERRA-2) and ERA5 are ~9–60 km grids over a small coastal city; they agree strongly with each other (correlations printed in §4.1) and with the *category* of official PAGASA events (Apr 28, 2024 → Danger both ways), but station-point extremes like PAGASA's 51°C reading will exceed gridded reanalysis. The app must ingest PAGASA's synoptic-station feed (Dagupan agromet/synoptic), with this notebook's reanalysis as the 45-year trend backbone.
-2. **The susceptibility surface is a planning proxy.** It is transparent (weights printed), satellite-based (Copernicus GLO-30 DSM — rooftop bias documented), and deliberately *not* a hydraulic model. Official flood-depth maps (DOST-Project NOAH legacy / DPWH studies) and PDRRMO stage records (Pantal Alert/Alarm/Critical) supersede it for engineering.
-3. **Barangay geometry is the app's #1 data partnership.** Open portals stop at municipality level for Dagupan; the LGU (CPDO/CDRRMO) and the CBMS household surveys unlock true per-barangay targeting. Everything else is already in hand.
-4. **Models are honest-size.** Annual heat-day models reach held-out R² values printed in §9; the RF's cross-validated gain over trend alone is small — these are *planning heuristics*, clearly labeled, not event forecasts. Forecast credibility in the app comes from PAGASA's own products; ClimateShield's edge is translation-to-action.
-5. **Exposure rasters age.** WorldPop 2020 + the 2020 census under-count new construction since; OSM coverage of Dagupan is strong on schools/hydrology but imperfect — crowd-validation loops (photo-tagged infrastructure checks) are product features, not bugs.
-6. **Data dignity & licensing.** Crowd reports are anonymous, per-informed-consent; all datasets are used under their licenses (PSA data via OCHA HDX open license; WorldPop/ERA5 CC-BY 4.0; OSM ODbL; Copernicus free & open) with attribution carried into every artifact of the future app.
+1. Reanalysis is not station records. NASA POWER (MERRA-2) and ERA5 are ~9–60 km grids over a small coastal city; they agree strongly with each other (correlations printed in §4.1) and with the *category* of official PAGASA events (Apr 28, 2024 lands in Danger both ways), but station-point extremes like PAGASA's 51°C reading will exceed gridded reanalysis. The app must ingest PAGASA's synoptic-station feed (Dagupan agromet/synoptic), with this notebook's reanalysis as the 45-year trend backbone.
+2. The susceptibility surface is a planning proxy. It is transparent (weights printed), satellite-based (Copernicus GLO-30 DSM, rooftop bias documented), and deliberately *not* a hydraulic model. Official flood-depth maps (DOST-Project NOAH legacy / DPWH studies) and PDRRMO stage records (Pantal Alert/Alarm/Critical) supersede it for engineering.
+3. Barangay geometry is the app's #1 data partnership. Open portals stop at municipality level for Dagupan; the LGU (CPDO/CDRRMO) and the CBMS household surveys unlock true per-barangay targeting. Everything else is already in hand.
+4. The models are honest-size. Annual heat-day models reach held-out R² values printed in §9; the RF's cross-validated gain over trend alone is small, so these are *planning heuristics*, clearly labeled, not event forecasts. Forecast credibility in the app comes from PAGASA's own products; ClimateShield's role is translation-to-action.
+5. Exposure rasters age. WorldPop 2020 and the 2020 census under-count new construction since; OSM coverage of Dagupan is strong on schools/hydrology but imperfect, and crowd-validation loops (photo-tagged infrastructure checks) are product features, not bugs.
+6. Data dignity & licensing. Crowd reports are anonymous, per-informed-consent; all datasets are used under their licenses (PSA data via OCHA HDX open license; WorldPop/ERA5 CC-BY 4.0; OSM ODbL; Copernicus free & open) with attribution carried into every app artifact.
 
-**Headline numbers the command center ships with (all computed above):**"""))
+Headline numbers the command center ships with (all computed above):"""))
 
 CELLS_P6.append(("code", """files = sorted(CHARTS.glob("*")) + sorted(PROC.glob("*")) + sorted(map_dir.glob("*.html"))
 print("=== ARTIFACT MANIFEST ===")

@@ -2,11 +2,11 @@ CELLS_P4 = []
 
 CELLS_P4.append(("md", """## 6. Who is in harm's way? Exposure analysis
 
-Three official/spatial layers triangulate exposure:
+Three official and spatial layers triangulate exposure:
 
-1. **PSA 2020 Census of Population & Housing** — the authoritative count of Dagupan's 31 barangays (downloaded from the official PSA file mirrored on OCHA HDX)
-2. **WorldPop 2020** (100 m, CC-BY 4.0) — spatial distribution of those ~174k residents (used for maps and zone arithmetic; totals cross-checked against the census)
-3. **OpenStreetMap critical infrastructure** — schools, health facilities, civic/protective amenities, places of worship (historically the first evacuation shelters), and ~6.5k building footprints"""))
+1. PSA 2020 Census of Population & Housing: the authoritative count of Dagupan's 31 barangays (downloaded from the official PSA file mirrored on OCHA HDX)
+2. WorldPop 2020 (100 m, CC-BY 4.0): the spatial distribution of those ~174k residents (used for maps and zone arithmetic; totals cross-checked against the census)
+3. OpenStreetMap critical infrastructure: schools, health facilities, civic/protective amenities, places of worship (historically the first evacuation shelters), and ~6.5k building footprints"""))
 
 CELLS_P4.append(("code", """psa = pd.read_excel(RAW / "psa_2020_census_population_by_barangay.xlsx", sheet_name="2020 CPH")
 dag = psa[psa["Mun_City"] == "City of Dagupan"].copy()
