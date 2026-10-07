@@ -1509,8 +1509,7 @@ def _fragment_heat():
                                           "barangay core point (anchors)",
                                           height=604, autoplay=True, interval_ms=1000, hud=heat.HUD).get_root().render()
             components.html(film_html, height=604 + mapfilm.STORM_STRIP_PX, scrolling=False)
-        st.caption("_read: red line = residents in DANGER zones beyond any registered cooling point — the survival "
-                   "gap to close in a drill._" if False else "Reading: the red line on the strip = DANGER-zone "
+        st.caption("Reading: the red line on the strip = DANGER-zone "
                    "residents **beyond 2.5 km of any open cooling point** — the survival gap a drill should close. "
                    "Stats: residents in DANGER-band barangays per hour (PAGASA band ≥42°C at that barangay's felt "
                    "heat).")

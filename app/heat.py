@@ -42,7 +42,7 @@ SOURCES = {
 }
 
 HUD = {"w": "🌡️ feels like (city)", "p": "🧍 residents in DANGER zones",
-       "e": "❄ near a cooling point", "s": "⚠ no cooling point within 2.5 km", "bad": "s",
+        "e": "❄ near a cooling point", "s": "⚠ no cooling point within 2.5 km",
        "b": "❄ cooling points open", "r": "barangays in DANGER", "r_suffix": "",
        "legend": "felt heat °C — by PAGASA band",
        "legend_gradient": "linear-gradient(90deg,#e2e8f0,#fde047,#fb923c,#ef4444,#be123c)",
@@ -252,21 +252,18 @@ def cooling_stats():
 def felt_png(L, hi_by_idx, alpha=205):
     """Per-cell PNG colored by the barangay's felt heat (band color), land cells only."""
     import io as _io
-    import base64 as _b64
     from PIL import Image
     import cinema
     if L.brgy_cells is None:
         raise ValueError("boundary masks not built — run `python app/brgypoly.py`")
-    cmap = {i: cinema._hi_color(hi) for i, hi in hi_by_idx.items()}
-    rgb = {"94a3b8": (0x94, 0xa3, 0xb8), "fde047": (0xfd, 0xe0, 0x47), "fb923c": (0xfb, 0x92, 0x3c),
-           "ef4444": (0xef, 0x44, 0x44), "be123c": (0xbe, 0x12, 0x3c)}
-    rgba = np.zeros((L.h, L.w, 4), dtype=np.uint8)
-    idx = L.brgy_cells
-    land = L.land_mask & (idx >= 0)
-    # map band color hex to rgb tuple robustly
+
     def _rgb(h):
         h = h.lstrip("#")
         return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+    rgba = np.zeros((L.h, L.w, 4), dtype=np.uint8)
+    idx = L.brgy_cells
+    land = L.land_mask & (idx >= 0)
     for i in np.unique(idx[land]):
         sel = (idx == i)
         col = _rgb(cinema._hi_color(hi_by_idx.get(int(i), 27.0)))
@@ -386,12 +383,14 @@ def briefing_png(L, row, anchor, hi, cat, story_note, reach_row, lang="English")
     svcs.text(0, yy, "• Emergencies: 911 · Red Cross 143", fontsize=10.5, color="#7f1d1d", fontweight="bold")
     hyd = fig.add_axes([0.05, 0.08, 0.90, 0.42]); hyd.axis("off")
     hyd.text(0, 1.00, "Staying alive today", fontsize=13, fontweight="bold", color="#1f2937")
+    import textwrap as _tw
     y = 0.88
     for name, text_ in tips_:
         hyd.text(0, y, f"{name}:", fontsize=10.5, fontweight="bold")
-        for j, wl in enumerate(__import__("textwrap").wrap(text_, 88)):
+        lines = _tw.wrap(text_, 88)
+        for j, wl in enumerate(lines):
             hyd.text(0, y - (0.052 * (j + 1)), wl, fontsize=10)
-        y -= 0.052 * (__import__("textwrap").wrap(text_, 88).__len__() + 1) + 0.01
+        y -= 0.052 * (len(lines) + 1) + 0.01
     foot = fig.add_axes([0, 0, 1, 0.04]); foot.axis("off")
     foot.text(0.03, 0.45, "Community planning translation of PAGASA bands, DepEd ADM guidance & DOLE LA-08-23 · "
                           "official warnings: PAGASA / CDRRMO · simulator, not a warning", fontsize=7, color="#6b7280")
