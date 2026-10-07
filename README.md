@@ -104,4 +104,4 @@ The notebook is generated from `nbcells_part1..6.py` by `build_notebook.py` (whi
 - WorldPop: CC-BY 4.0 · ERA5/Open-Meteo: CC-BY 4.0 · OpenStreetMap: ODbL
 - Copernicus GLO-30: free & open (ESA/EEA)
 - News citations: INQUIRER.net, PIA, GMA, ABS-CBN (attribution, quoted sparsely)
-- Code: MIT (same as the original ClimateShield repo)
+- Code: MIT (see `LICENSE`, same as the original ClimateShield repo). The data layers keep their upstream licenses (OSM-derived files are ODbL; WorldPop/ERA5 CC-BY 4.0; Copernicus free & open): scope is mapped in `docs/SOURCES.md` §9.

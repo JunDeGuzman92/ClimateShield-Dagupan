@@ -85,3 +85,17 @@ All datasets, agency products, news reports, and scientific papers used or cited
 | DepEd statement, 4 Apr 2024 | School heads may suspend face-to-face classes and shift to ADM in extreme heat | https://www.deped.gov.ph/2024/04/04/on-class-suspensions-and-shifting-to-adm-due-to-high-heat-index-other-calamities |
 | Draft 2026 automatic-suspension proposal (≥40°C) | Reported Jul 2026, not policy; shown in the app flagged as draft | Reported by GMA News, 29 Jul 2026 |
 | DOLE Labor Advisory No. 08, s. 2023 | Heat-stress prevention: risk/comorbidity assessment, rest breaks, uniforms/PPE, ≥2–3 L water, info campaigns, emergency procedures, flexible hours | https://bwc.dole.gov.ph/wp-content/uploads/2024/06/LA-08-23-Safety-and-Health-Measures-to-Prevent-and-Control-Heat-Stress-at-the-Workplace.pdf |
+
+## 9. How licensing applies to this repository
+
+The code and the data carry different licenses; this section says which is which.
+
+- **Code: MIT** (`LICENSE`). The app, the notebook cell sources and the build scripts are free to use, modify and redistribute with attribution.
+- **OpenStreetMap-derived files are ODbL.** `data/app_layers/rivers.pkl`, `roads.pkl`, `coast.pkl`, `places.pkl`, `buildings.pkl`, `facilities.pkl`, `street_graph.pkl`, `brgy_boundaries_derived.geojson`, the `heat_*` layer files, and the raw extract `data/raw/osm_dagupan_features_raw.json` derive from OpenStreetMap, © OpenStreetMap contributors, licensed under the Open Database License (ODbL) v1.0. Distributed derivatives stay under ODbL; the attribution line stays with them.
+- **Copernicus-derived rasters**: `dem_utm.npy`, `hillshade.npy`, `land_mask.npy`, `city_mask.npy`, `susc.npy`, `dist_river.npy`, `dist_coast.npy`, `elev_calibration.npz` (contains modified Copernicus data, ESA/EEA; free and open).
+- **WorldPop-derived**: `pop_utm.npy` (CC-BY 4.0, WorldPop 2020).
+- **NASA POWER-derived**: `daily.csv` (NASA open data; attribute NASA POWER / Langley Research Center).
+- **PSA census table and PAGASA/DepEd/DOLE texts**: Philippine government works carry no copyright (RA 8293 §176); cited anyway.
+- **`basemap_utm.npy`** is a reprojected copy of Esri Light Gray Canvas tiles rendered for chart backgrounds (`prep_layers.py`). Esri tiles are used in the live maps with attribution, but bulk-stored tile copies should not ship in a public repo; it is flagged for regeneration from the OSM/Copernicus layers above.
+- **Personal data never ships**: runtime CSVs that could hold names or numbers (requests, contacts, exercise state) are gitignored and stay on the operator's machine; nothing person-identifiable is distributed under any license.
+
