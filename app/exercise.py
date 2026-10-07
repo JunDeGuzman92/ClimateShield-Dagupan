@@ -544,8 +544,8 @@ def debrief_figure(L, state, sc=None):
         except Exception:
             return np.nan
 
-    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(9, 6.2), height_ratios=[2.2, 1],
-                                  gridspec_kw=dict(hspace=0.35))
+    fig, (ax, ax_leg, ax2) = plt.subplots(3, 1, figsize=(9, 7.6), height_ratios=[2.6, 0.30, 1],
+                                        gridspec_kw=dict(hspace=0.30))
     t = np.linspace(0, total_min, 240)
     Ws = [water_at(L, story, tm * speed) for tm in t]
     ax.plot(t, Ws, color="#2563eb", lw=2.2)
@@ -574,12 +574,17 @@ def debrief_figure(L, state, sc=None):
                 va="top", ha="right" if x / max(total_min, 1e-9) > 0.92 else "left",
                 transform=ax.get_xaxis_transform())
     ax.set_xlim(0, total_min)
-    ax.legend(handles=[
+    # legend gets its own strip between chart and score table: nothing to collide with by construction.
+    # (fractional offsets below/above the axes kept drifting into the title, the ticks, then the table —
+    # the strip below is where every other chart in the app puts its key.)
+    ax_leg.axis("off")
+    ax_leg.legend(handles=[
         plt.Line2D([], [], color="#2563eb", lw=2, label="storm water (m)"),
         plt.Line2D([], [], marker="v", ls="", color="#6b7280", label="text → request"),
         plt.Line2D([], [], marker="o", ls="", color="#f59e0b", label="unit assigned"),
         plt.Line2D([], [], marker="*", ls="", color="#16a34a", label="delivered / resolved"),
-    ], fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=4, framealpha=0.95)
+    ], fontsize=9, loc="center", ncol=4, frameon=False,
+        handletextpad=0.4, columnspacing=2.0)
     sc = sc or state.get("final_score") or {}
     k = sc.get("kpis", {})
     rows = [

@@ -67,10 +67,16 @@ def test_debrief_figure_renders_the_run(layers):
     assert labs, "event labels missing from the debrief chart"
     ys = {round(t.get_position()[1], 3) for t in ax.texts if t.get_text().startswith("E")}
     assert len(ys) >= 2, "event labels must stagger at two heights"
-    tables = [c for c in fig.axes[1].get_children() if type(c).__name__ == "Table"]
+    tables = [c for c in fig.axes[-1].get_children() if type(c).__name__ == "Table"]
     assert tables, "score rows must use an auto-layout Table (hand-stacked text overlapped the footer)"
-    leg = ax.get_legend()
+    leg = [a for a in fig.axes if a.get_legend() is not None]
+    assert len(leg) == 1, "exactly one legend, in its own strip"
+    legax, leg = leg[0], leg[0].get_legend()
+    assert legax not in (ax, fig.axes[-1]), "legend must live in its own strip, not the plot or the score table"
     fig.canvas.draw()
     leg_bb, title_bb = leg.get_window_extent(), ax.title.get_window_extent()
     assert not leg_bb.overlaps(title_bb), "legend must not cover the chart title"
     assert not leg_bb.overlaps(ax.get_window_extent()), "legend must not cover the plot area"
+    for other in fig.axes:
+        if other is not legax:
+            assert not leg_bb.overlaps(other.get_window_extent()), "legend must not cover any other panel"
