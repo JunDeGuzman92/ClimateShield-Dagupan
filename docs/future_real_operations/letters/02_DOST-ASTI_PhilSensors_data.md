@@ -11,7 +11,7 @@ Dear Sir/Madam,
 
 ClimateShield-Dagupan is a volunteer community project providing open flood-preparedness tools for Dagupan City, Pangasinan, in support of the City DRRM Office.
 
-While integrating PhilSensors, we noted (public data page, 5 October 2026) that the Pangasinan water-level stations — including Calvo Bridge (Bayambang), Hector Mendoza Bridge (Alcala), Macalong and Tagamusing Bridges (Urdaneta), San Roque Dam, and Don Marcelo Nagal Bridge (Agno) — and the nearby rain gauges (Calasiao, Binmaley, PAGASA-Dagupan) show latest public readings between 2015 and 2024. No station currently reports inside Dagupan.
+While integrating PhilSensors, we noted (public data page, 7 October 2026) that the Pangasinan water-level stations — including Calvo Bridge (Bayambang), Hector Mendoza Bridge (Alcala), Macalong and Tagamusing Bridges (Urdaneta), San Roque Dam, and Don Marcelo Nagal Bridge (Agno) — and the nearby rain gauges (Calasiao, Binmaley, PAGASA-Dagupan) show latest public readings between 2015 and 2024. No station currently reports inside Dagupan.
 
 We respectfully request:
 
