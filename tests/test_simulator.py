@@ -52,7 +52,7 @@ def test_simulator_views():
 
 
 def test_walkthrough_route_and_action_card():
-    at = goto(boot(), NAV[4])
+    at = goto(boot(), NAV[5])
     button(at, startswith="Evacuation route").click(); at.run(); no_exc(at)
     assert "Water here" in _md(at), "person-vs-water gauge missing"
     button(at, startswith="Action card").click(); at.run(); no_exc(at)
@@ -60,7 +60,7 @@ def test_walkthrough_route_and_action_card():
 
 
 def test_walkthrough_terrain_tab_explains_itself():
-    at = goto(boot(), NAV[4])
+    at = goto(boot(), NAV[5])
     button(at, label="Terrain").click(); at.run(); no_exc(at)
     md = _md(at)
     assert "How to read this map" in md, "map reading guide missing"
@@ -72,7 +72,7 @@ def test_walkthrough_terrain_tab_explains_itself():
 
 
 def test_telemetry_has_freshness_and_sensor_panel():
-    at = goto(boot(), NAV[3])
+    at = goto(boot(), NAV[4])
     no_exc(at)
     md = _md(at)
     assert ("LIVE" in md) or ("STALE" in md) or ("NO FEED" in md)

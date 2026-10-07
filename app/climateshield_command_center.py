@@ -102,7 +102,7 @@ def save_prefs(p):
 
 PREFS = load_prefs()
 _apply_theme_tokens()
-NAV = ["🏠 Command Deck", "🌊 Flood Scenario Simulator", "🛡️ Countermeasure Lab",
+NAV = ["🏠 Command Deck", "🌊 Flood Scenario Simulator", "☀️ Heat Scenario Simulator", "🛡️ Countermeasure Lab",
        "📡 Live Telemetry", "🗺️ Barangay Walkthrough", "🚑 Response & Dispatch", "ℹ️ Methods & Sources"]
 
 
@@ -662,7 +662,7 @@ def _nav_to(v):
 
 def _go_brgy(qv):
     st.session_state["wt_sel"] = qv
-    st.session_state["nav_page"] = NAV[4]
+    st.session_state["nav_page"] = NAV[5]
 
 
 def _go_walk():
@@ -1107,11 +1107,11 @@ if page == NAV[0]:
               help="Storm + tide sliders → impact map, storm time-lapse, evacuation route",
               on_click=_nav_to, args=(NAV[1],))
     nb.button("🛡️ Plan countermeasures", use_container_width=True,
-              help="Dredging / drainage / relocation — watch exposure drop", on_click=_nav_to, args=(NAV[2],))
+              help="Dredging / drainage / relocation — watch exposure drop", on_click=_nav_to, args=(NAV[3],))
     nc.button("📡 Live telemetry", use_container_width=True,
-              help="Rain radar, river log, crowd reports, heat gauge", on_click=_nav_to, args=(NAV[3],))
+              help="Rain radar, river log, crowd reports, heat gauge", on_click=_nav_to, args=(NAV[4],))
     nd.button("🗺️ My barangay", use_container_width=True,
-              help="5-step guided walkthrough ending in an action card + PDF briefing", on_click=_nav_to, args=(NAV[4],))
+              help="5-step guided walkthrough ending in an action card + PDF briefing", on_click=_nav_to, args=(NAV[5],))
     if ne.button("📺 Wall display", use_container_width=True,
                  help="Full-screen auto-rotating command center for an ops room TV"):
         PREFS["kiosk"] = True
@@ -1132,7 +1132,7 @@ if page == NAV[0]:
     _rq = rsp.load_requests()
     _open = _rq[_rq["status"] != "resolved"] if len(_rq) else _rq
     st.button(f"🚑 Response & Dispatch — {len(_open)} open request(s)", use_container_width=True,
-              type="primary" if len(_open) else "secondary", on_click=_nav_to, args=(NAV[5],),
+              type="primary" if len(_open) else "secondary", on_click=_nav_to, args=(NAV[6],),
               help="Log stranded-community requests, see nearest hospitals / fire / police / shelters, dispatch.")
 
     if panels.get("kpis"):
@@ -1396,6 +1396,237 @@ def _fragment_sim():
                     st.caption("PDF export is unavailable on this machine (a Windows security policy blocks the PDF "
                                "library) — the briefing downloads as a printable image instead.")
                 st.caption("Copy-ready for SMS/Viber/Facebook. Full guided flow in 🗺️ Barangay Walkthrough.")
+
+
+    # ================================================================= HEAT SIMULATOR
+@st.fragment
+def _fragment_heat():
+    st.button("Back to Command Deck", on_click=_nav_to, args=(NAV[0],), key="heat_back")
+    st.title("☀️ Heat Scenario Simulator")
+    st.caption("A whole heat day, hour by hour — what it feels like in every barangay, which relief and health "
+               "services are reachable, and the survival actions behind PAGASA bands, DepEd class rules and "
+               "DOLE labor guidance. Simulator only — official warnings come from PAGASA and the CDRRMO.")
+
+    ctl, mapcol = st.columns([1, 3.1])
+    with ctl:
+        st.markdown("#### Heat day")
+        mode = st.radio("Day source", ["📌 Recorded heat days", "🎛️ Build your own day", "📡 Live forecast (today)"],
+                        horizontal=True, label_visibility="collapsed", key="heat_mode")
+        if mode.startswith("📌"):
+            hkeys = list(cinema.HEAT_STORIES.keys())
+            hsel = st.selectbox("Recorded day", hkeys, format_func=lambda k: cinema.HEAT_STORIES[k]["title"], key="heat_story")
+            hstory = cinema.HEAT_STORIES[hsel]
+        elif mode.startswith("🎛️"):
+            d1, d2 = st.columns(2)
+            hx_tmax = d1.slider("Peak air (°C)", 31, 40, 37, key="hx_tmax")
+            hx_rh = d2.slider("Humidity (%RH)", 40, 95, 60, key="hx_rh")
+            hx_br = st.toggle("Brownout 10:00–16:00", value=True, key="hx_br",
+                              help="No fans or cold water — indoors runs ~3°C above shade.")
+            hx_night = st.toggle("Tropical night (min 26.5°C)", value=True, key="hx_night",
+                                 help="No overnight relief — tomorrow starts hot.")
+            hstory = dict(title="Your own heat day", tmax=float(hx_tmax), tmin=26.5 if hx_night else 25.5,
+                          rh_day=float(hx_rh), rh_night=80.0, brownout=bool(hx_br))
+        else:
+            live, ok_ = get_live()
+            hourly = (live or {}).get("hourly") or {}
+            now_h = pd.Timestamp.now().floor("h")
+            if "temperature_2m" in hourly and len(hourly["temperature_2m"]):
+                tday = pd.Series(hourly["temperature_2m"], index=pd.to_datetime(hourly["time"]))
+                rhday = pd.Series(hourly["relative_humidity_2m"], index=tday.index)
+                win = tday[(tday.index >= now_h.floor("D")) & (tday.index < now_h.floor("D") + pd.Timedelta(days=1))]
+                rhwin = rhday.reindex(win.index)
+                hstory = dict(title="Today's live forecast (min/max are live; hour shape modelled)",
+                               tmax=float(win.max()), tmin=float(win.min()),
+                               rh_day=float(rhwin.iloc[len(rhwin) // 2]), rh_night=float(rhwin.iloc[0]),
+                               brownout=False)
+            else:
+                st.caption("Live hourly temperature unavailable — falling back to the April typical day.")
+                hstory = cinema.HEAT_STORIES["april_typical"]
+        plan = cinema.heat_plan(L, hstory)
+        pkh = max(plan, key=lambda f: f["hi"])
+        hour = st.select_slider("Hour of the day", options=[f["hour"] for f in plan], value=pkh["hour"],
+                                key="heat_hour", format_func=lambda h: f"{h:02d}:00")
+        fh = next(f for f in plan if f["hour"] == hour)
+        cat, catcolor = dc.hi_category(fh["hi"])[0], dc.hi_category(fh["hi"])[1]
+        i_hi = fh["hi_indoor"]
+        st.markdown(f"<div class='cs-factor'><span>City feels like at {hour:02d}:00</span>"
+                    f"<b style='color:{catcolor};'>{fh['hi']:.0f}°C · {cat}</b>"
+                    f"<small>indoors ≈ {i_hi:.0f}°C ({'brownout' if i_hi > fh['hi'] else 'fans ok'})</small></div>",
+                    unsafe_allow_html=True)
+        hp = heat.protocol_for(fh["hi"])
+        with st.expander("📋 Protocol at this hour", expanded=True):
+            if hp:
+                top = hp[-1]
+                st.markdown(f"**{top['band']}** — {top['headline']}")
+                for owner, text in top["actions"]:
+                    st.markdown(f"- **{owner}:** {text}")
+                st.caption("Sources: " + " · ".join(sorted({s for p in hp for s in p["sources"]}, key=lambda x: list(
+                    heat.SOURCES).index(x)))[:200])
+            else:
+                st.caption("Below 27°C — no protocol band in force.")
+
+    t1, t2, t3, t4 = st.tabs(["🗺️ Felt-heat map", "🎬 Day time-lapse", "🚶 Relief reach & survival", "📄 Cards & community copy"])
+
+    # ------------------------------------------------------------ map
+    with t1:
+        try:
+            import folium
+            from streamlit_folium import st_folium
+            pts = {p["name"]: p for p in cinema.heat_barangay_points(L, fh["hi"])}
+            fm = folium.Map(location=(16.04, 120.34), zoom_start=12, tiles=None, control_scale=True)
+            folium.TileLayer(tiles=mapfilm.ESRI_SAT[0], attr=mapfilm.ESRI_SAT[1], name="satellite").add_to(fm)
+            folium.TileLayer(tiles=kit.ESRI_GRAY[0], attr=kit.ESRI_GRAY[1], name="map").add_to(fm)
+            choro = {nm: dict(frac=min(1.0, p["hi"] / 55.0),
+                              note=f"feels like {p['hi']:.0f}°C ({dc.hi_category(p['hi'])[0]}) · pop {p['pop']:,}")
+                     for nm, p in pts.items()}
+            kit.brgy_layer(L, fm, choro=choro)
+            for _, c in heat.load_cooling().iterrows():
+                try:
+                    folium.CircleMarker([float(c["lat"]), float(c["lon"])], radius=8, color="#0e7490",
+                                        fill=True, fill_color="#22d3ee", fill_opacity=0.95,
+                                        tooltip=f"❄ {c['name']} · {c['status']} · kind {c['kind']}").add_to(fm)
+                except Exception:
+                    pass
+            for fct in L.facilities:
+                if fct["category"] == "health":
+                    folium.CircleMarker([fct["lat"], fct["lon"]], radius=3.5, color="white", weight=0.8,
+                                        fill=True, fill_color="#ef4444", fill_opacity=0.95,
+                                        tooltip=f"health: {fct['name'] or '?'}").add_to(fm)
+            folium.LayerControl().add_to(fm)
+            st_folium(fm, height=560, use_container_width=True, returned_objects=[], key="heat_city_map")
+            st.caption("Every barangay shaded by **felt** heat (city curve + urban-heat offset; districts "
+                       f"clipped to **{L.boundary_source.split('(')[0].strip()}** boundaries). ❄ = registered cooling "
+                       "points, red = health sites. Boundary file swaps in when the LGU releases it.")
+        except Exception as e:
+            st.info(f"Map unavailable ({type(e).__name__}).")
+
+    # ------------------------------------------------------------ film
+    with t2:
+        if _gate("play_heatsim", "The film loads ~150 KB of hourly overlay frames — tiles stats above are live."):
+            frames = heat.film_frames(L, plan, hstory, heat.cooling_reach(L))
+            film_html = mapfilm.storm_map(L, frames, hstory["title"],
+                                          "bands clipped per barangay · cooling reach = 2.5 km radius around each "
+                                          "barangay core point (anchors)",
+                                          height=604, autoplay=True, interval_ms=1000, hud=heat.HUD).get_root().render()
+            components.html(film_html, height=604 + mapfilm.STORM_STRIP_PX, scrolling=False)
+        st.caption("_read: red line = residents in DANGER zones beyond any registered cooling point — the survival "
+                   "gap to close in a drill._" if False else "Reading: the red line on the strip = DANGER-zone "
+                   "residents **beyond 2.5 km of any open cooling point** — the survival gap a drill should close. "
+                   "Stats: residents in DANGER-band barangays per hour (PAGASA band ≥42°C at that barangay's felt "
+                   "heat).")
+
+    # ------------------------------------------------------------ relief + survival
+    with t3:
+        bsel_list = sorted(L.brgy["barangay"].tolist())
+        b_sel = st.selectbox("Community", bsel_list, index=bsel_list.index("Pantal"), key="heat_b_sel")
+        brow = L.brgy[L.brgy["barangay"] == b_sel].iloc[0]
+        a = _anchor(b_sel)
+        if a is None:
+            st.info("No map anchor for this barangay yet — set one under Maps → Barangay boundary tools (LGU).")
+        else:
+            reach_row = heat.cooling_reach(L).get(b_sel)
+            pts_h = {p["name"]: p for p in cinema.heat_barangay_points(L, fh["hi"])}
+            hb = pts_h.get(b_sel)
+            rc1, rc2 = st.columns([1.5, 1])
+            with rc1:
+                try:
+                    import folium
+                    from streamlit_folium import st_folium
+                    fm2 = folium.Map(location=(a["lat"], a["lon"]), zoom_start=14, tiles=None)
+                    folium.TileLayer(tiles=mapfilm.ESRI_SAT[0], attr=mapfilm.ESRI_SAT[1], name="satellite").add_to(fm2)
+                    folium.TileLayer(tiles=kit.ESRI_GRAY[0], attr=kit.ESRI_GRAY[1], name="map").add_to(fm2)
+                    kit.brgy_layer(L, fm2, highlight=b_sel)
+                    folium.Marker([a["lat"], a["lon"]], tooltip=f"{b_sel} core",
+                                  icon=folium.Icon(color="orange", icon="home", prefix="fa")).add_to(fm2)
+                    cx = heat.load_cooling()
+                    n_mark = 0
+                    for _, c in cx.iterrows():
+                        try:
+                            la, lo = float(c["lat"]), float(c["lon"])
+                        except Exception:
+                            continue
+                        d = rsp.haversine_m(a["lat"], a["lon"], la, lo)
+                        col = "#22d3ee" if (c["status"] == "open" and d <= 2500) else ("#f59e0b" if c["status"] == "open" else "#9ca3af")
+                        folium.CircleMarker([la, lo], radius=8, color="#0e7490", fill=True, fill_color=col,
+                                            fill_opacity=0.95,
+                                            tooltip=(f"❄ {c['name']} · {c['status']} · {d/1000:.1f} km"
+                                                     + (f" · space {c['capacity']}" if c["capacity"] else ""))).add_to(fm2)
+                        if c["status"] == "open" and d <= 2500:
+                            folium.PolyLine([[a["lat"], a["lon"]], [la, lo]], color="#22d3ee", weight=2.5,
+                                            dash_array="5 7", opacity=0.85).add_to(fm2)
+                        n_mark += 1
+                    near_h = rsp.nearest_services(L, a["lat"], a["lon"], fh["hi"], per_type=1)
+                    for _, r in near_h.iterrows():
+                        folium.CircleMarker([r["lat"], r["lon"]], radius=6, color="white", weight=1.4,
+                                            fill=True, fill_color="#ef4444", fill_opacity=1,
+                                            tooltip=f"nearest {r['service']}: {r['name']} · {r['distance_m']/1000:.1f} km · "
+                                                    f"site {r['state']}").add_to(fm2)
+                    folium.LayerControl().add_to(fm2)
+                    st_folium(fm2, height=460, use_container_width=True, returned_objects=[], key="heat_reach_map")
+                    st.caption(f"Cooling points: {n_mark} registered · teal = open and within 2.5 km; amber = open "
+                               "but beyond; grey = closed. Health site = nearest per category, **site state** at "
+                               "felt-heat basis (no water-game here: heat doesn't trip the flood-state logic).")
+                except Exception as e:
+                    st.info(f"Map unavailable ({type(e).__name__}).")
+            with rc2:
+                st.markdown("#### Reach")
+                if hb:
+                    catb = dc.hi_category(hb["hi"])[0]
+                    st.metric("This barangay feels like", f"{hb['hi']:.0f}°C", f"{catb} band", delta_color="off")
+                if reach_row and reach_row[0] is not None:
+                    d, nm, stt = reach_row
+                    st.metric("Nearest OPEN cooling", nm[:30], f"{d/1000:.1f} km" + (" · CLOSED" if stt != "open" else ""),
+                              delta_color="off")
+                else:
+                    st.metric("Nearest OPEN cooling", "none registered", "within 2.5 km: nothing — register in the Deck's ❄️ register",
+                              delta_color="inverse")
+            st.markdown("#### Stay-alive today")
+            for nm, tip_ in heat.tips(PREFS.get("lang", "Tagalog" if PREFS.get("lang") == "Tagalog" else "English")):
+                st.markdown(f"- **{nm}:** {tip_}")
+            d911 = rsp.load_directory()
+            natl = d911[(d911["confirmed_by_call"].astype(str) == "True")
+                        & ((d911["mobile"].str.len() > 0) | (d911["landline_075"].str.len() > 0))]
+            chips = " · ".join(f"{r['organisation']}: **{r['mobile'] or r['landline_075']}**"
+                               for _, r in natl.iterrows())
+            st.markdown(f"**Emergencies (national, verified lines):** {chips}", unsafe_allow_html=True)
+
+    # ------------------------------------------------------------ cards & copy
+    with t4:
+        b_row4 = L.brgy[L.brgy["barangay"] == b_sel].iloc[0]
+        lang4 = PREFS.get("lang", "English")
+        card4 = kit.action_card_heat(b_row4, fh["hi"], dc.hi_category(fh["hi"])[0], lang=lang4)
+        st.code(card4, language=None)
+        a4 = _anchor(b_sel)
+        reach4 = heat.cooling_reach(L).get(b_sel)
+        png4 = heat.briefing_png(L, b_row4, a4, fh["hi"], dc.hi_category(fh["hi"])[0], hstory["title"], reach4, lang4)
+        st.download_button("⬇ One-page heat survival card (PNG)", data=png4,
+                           file_name=f"climateshield_heat_{b_sel}.png", mime="image/png",
+                           use_container_width=True)
+        st.caption("Cards go to Viber/boards: felt heat uses {} at the {} hour; services use straight-line distance "
+                   "and the DERIVED boundary labels reflow to official names as soon as the LGU file loads.".format(
+                       hstory["title"], hour))
+
+    # ------------------------------------------------------------ tabletop inject pack
+    with st.expander("🎲 Heat tabletop injects (facilitator)"):
+        st.caption("Read one inject at a time during a team drill — same format as the flood exercise. What breaks "
+                   "first is the lesson.")
+        for inj in [
+            ("05:00 · Brownout notice", "Cooperative says load-shedding 10:00–16:00. No fans, no cold chain, no pumps "
+                                        "at cooling points. Which do you fix first? (DOLE rest breaks become critical)"),
+            ("09:00 · Water outage", "Main pressure drops in the network; refilling stations close early. Where do "
+                                     "trucked water points go? (Deck ranking: people × DANGER-hours)"),
+            ("11:30 · School call", "Felt heat crosses 42°C in dense cores. Do you recommend ADM? Whose call — "
+                                    "school head or barangay or CDRRMO? (DepEd-2024 discretion)"),
+            ("13:00 · Casualty", "Outdoor worker collapses: hot dry skin, confused. Your first three actions — "
+                                 "cool, call 911, family notify. Who on your roster does each?"),
+            ("14:30 · Single elderly", "Buddy checker can't reach three elderly living alone. Who has keys + who "
+                                       "drives in this heat?"),
+            ("16:00 · Cooling point full", "Your one open center hits capacity. Nearest other is 4 km — do you "
+                                           "re-open a school hall or open shaded churches?"),
+            ("18:30 · Lines down", "Cell sites on generator, texts delayed four hours. Which fallback do you trust — "
+                                   "radio, siren, or chains of neighbours?"),
+            ("Tomorrow's core", "Today never dropped below 26.5°C. What changes tomorrow's schedule before sunrise?")]:
+            st.markdown(f"**{inj[0]}** — {inj[1]}")
 
 
     # ================================================================= COUNTERMEASURE LAB
@@ -3063,20 +3294,23 @@ if page == NAV[1]:
     _fragment_sim()
 
 if page == NAV[2]:
-    _fragment_lab()
+    _fragment_heat()
 
 if page == NAV[3]:
-    _fragment_tel()
+    _fragment_lab()
 
 if page == NAV[4]:
-    _fragment_wlk()
+    _fragment_tel()
 
 if page == NAV[5]:
+    _fragment_wlk()
+
+if page == NAV[6]:
     st.button("Back to Command Deck", on_click=_nav_to, args=(NAV[0],), key="resp_back")
     st.title("🚑 Response & Dispatch")
     _fragment_exercise()
     _fragment_response()
 
-if page == NAV[6]:
+if page == NAV[7]:
     _fragment_methods()
 

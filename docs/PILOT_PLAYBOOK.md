@@ -44,3 +44,21 @@ events acknowledged (and how fast) 15 · texts answered 10 · penalties −5 per
 | What would you change in the screen layout? | |
 
 Finish with **🧹 Reset simulation** so the next group starts clean.
+
+## Heat drill variant (☀️ Heat Scenario Simulator)
+
+The heat tabletop uses the same two-screen setup (operator + 🖥 facilitator):
+1. Pick a day — recorded (April typical · 2024-type wave · wave + brownout), **build your own** (peak °C, RH%,
+   brownout, tropical night), or **today's live forecast**.
+2. Use the 🎬 **Day time-lapse** to let the day play in front of the room — pause at the hour the
+   facilitator calls out (e.g. "13:00 · casualty").
+3. Work the 🚶 **Relief reach & survival** tab for one community (default Pantal): who is beyond 2.5 km of
+   an open cooling point? Which school call (DepEd discretion) happens at which band? Where does the
+   nearest health site sit?
+4. Use the **heat tabletop injects** (bottom of the page) as complications — brownout, water outage,
+   casualty, cooling point full.
+5. Close with the 📄 heat **survival card** (PNG) for the community — it is the takeaway for the
+   barangay board.
+
+Read the protocol sources before quoting: PAGASA bands; DepEd Order 37 s.2022 + 4-Apr-2024 ADM discretion;
+a 2026 draft auto-suspension rule flagged draft-not-policy; DOLE Labor Advisory 08 s.2023.

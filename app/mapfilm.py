@@ -111,8 +111,18 @@ def _replay_frames(L, story, max_frames=48):
     return frames
 
 
+FLOOD_HUD = {"w_line": "people stranded over the", "p": "🧍 people in water", "e": "🏫 in shelters",
+             "s": "⚠ stranded", "b": "🏠 buildings in water", "r": "🛣 roads cut", "r_suffix": " km",
+             "legend": "flood depth: shallow → deep",
+             "legend_gradient": "linear-gradient(90deg,#ffffd9,#7fcdbb,#1d91c0,#081d58)"}
+
+
 def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, height=600,
-              autoplay=True, interval_ms=1100):
+              autoplay=True, interval_ms=1100, hud=None):
+    """Film player HUD. `hud` overrides stat labels/units/legend (see heat.HUD); flood defaults kept.
+    NOTE: the HTML block variable is `hud_html` — never name it `hud`, it shadows this parameter
+    (that bug shipped once; the heat tests catch it now)."""
+    HUDL = {**FLOOD_HUD, **(hud or {})}
     m = _base(center, zoom, satellite=True, height=height)
     bounds = kit.grid_bounds_4326(L)
     bb = [[bounds[1], bounds[0]], [bounds[3], bounds[2]]]
@@ -137,7 +147,7 @@ def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, hei
     hmax = int(frames[-1]["hour"])
     smax = max(1.0, max(f["stranded"] for f in frames))
     pts = " ".join(f"{(f['hour'] / max(hmax, 1)) * 1000:.1f},{44 - (f['stranded'] / smax) * 40:.1f}" for f in frames)
-    hud = f"""
+    hud_html = f"""
     <style>
     html, body {{ margin:0; padding:0; font-family:'Source Sans Pro','Segoe UI',sans-serif; background:#fff; }}
     .cs-chip {{ position:absolute; z-index:1000; background:rgba(255,255,255,.95); border:1px solid #e5e7eb;
@@ -166,15 +176,15 @@ def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, hei
     </style>
     <div class="cs-chip cs-tag" id="tag_{mid}">{title}</div>
     <div class="cs-chip cs-now" id="now_{mid}"><b id="hour_{mid}">HOUR 00</b> · <span id="w_{mid}"></span></div>
-    <div class="cs-chip cs-legend" id="leg_{mid}">flood depth: shallow → deep<div class="bar"></div></div>
+    <div class="cs-chip cs-legend" id="leg_{mid}">{HUDL['legend']}<div class="bar" style="background:{HUDL['legend_gradient']};"></div></div>
     <div class="cs-strip" id="hud_{mid}">
       <div class="cs-cap" id="cap_{mid}"></div>
       <div class="cs-stats">
-        <div class="cs-stat"><span>🧍 people in water</span><b id="p_{mid}"></b></div>
-        <div class="cs-stat"><span>🏫 in shelters</span><b id="e_{mid}"></b></div>
-        <div class="cs-stat bad"><span>⚠ stranded</span><b id="s_{mid}"></b></div>
-        <div class="cs-stat"><span>🏠 buildings in water</span><b id="b_{mid}"></b></div>
-        <div class="cs-stat"><span>🛣 roads cut</span><b id="r_{mid}"></b></div>
+        <div class="cs-stat"><span>{HUDL['p']}</span><b id="p_{mid}"></b></div>
+        <div class="cs-stat"><span>{HUDL['e']}</span><b id="e_{mid}"></b></div>
+        <div class="cs-stat bad"><span>{HUDL['s']}</span><b id="s_{mid}"></b></div>
+        <div class="cs-stat"><span>{HUDL['b']}</span><b id="b_{mid}"></b></div>
+        <div class="cs-stat"><span>{HUDL['r']}</span><b id="r_{mid}"></b></div>
         <div class="cs-stat"><span>⏱ hour</span><b id="hh_{mid}"></b></div>
       </div>
       <div class="cs-ctl">
@@ -187,7 +197,7 @@ def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, hei
           <input type="range" id="rng_{mid}" min="0" max="{len(frames) - 1}" value="0" step="1">
         </div>
       </div>
-      <div class="cs-sub">red line = people stranded over the {hmax} hours · {subtitle}</div>
+      <div class="cs-sub">red line = {HUDL['w_line']} {hmax} hours · {subtitle}</div>
     </div>
     """
     js = f"""
@@ -205,11 +215,12 @@ def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, hei
         i = k; var f = meta[k];
         ovs.forEach(function(o, j){{ o.setOpacity(j === k ? 0.82 : 0); }});
         $('hour').textContent = f.label ? f.label : 'HOUR ' + String(Math.round(f.hour)).padStart(2, '0') + (f.hour >= 24 ? ' · day ' + (Math.floor(f.hour / 24) + 1) : '');
-        $('w').textContent = f.W <= 0 ? 'streets dry' : 'water +' + f.W.toFixed(2) + ' m';
+        $('w').textContent = (typeof f.W === 'string') ? f.W
+            : (f.W <= 0 ? 'streets dry' : 'water +' + f.W.toFixed(2) + ' m');
         $('cap').innerHTML = '<b>' + $('hour').textContent + '</b>' + f.caption;
         $('p').textContent = fmt(f.pop_in); $('e').textContent = fmt(f.evacuated);
         $('s').textContent = fmt(f.stranded); $('b').textContent = fmt(f.bldg);
-        $('r').textContent = f.roads_km.toFixed(0) + ' km';
+        $('r').textContent = f.roads_km.toFixed(0) + '{HUDL["r_suffix"]}';
         $('hh').textContent = Math.round(f.hour) + ' / {hmax}';
         $('rng').value = k;
         var x = (f.hour / {max(hmax, 1)}) * 1000; $('cur').setAttribute('x1', x); $('cur').setAttribute('x2', x);
@@ -228,7 +239,7 @@ def storm_map(L, frames, title, subtitle, center=(16.055, 120.335), zoom=13, hei
     if (document.readyState === 'loading') {{ document.addEventListener('DOMContentLoaded', csInit_{mid}); }}
     else {{ csInit_{mid}(); }}
     """
-    m.get_root().html.add_child(folium.Element(hud))
+    m.get_root().html.add_child(folium.Element(hud_html))
     m.get_root().script.add_child(folium.Element(js))
     return m
 
