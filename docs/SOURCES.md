@@ -96,6 +96,6 @@ The code and the data carry different licenses; this section says which is which
 - **WorldPop-derived**: `pop_utm.npy` (CC-BY 4.0, WorldPop 2020).
 - **NASA POWER-derived**: `daily.csv` (NASA open data; attribute NASA POWER / Langley Research Center).
 - **PSA census table and PAGASA/DepEd/DOLE texts**: Philippine government works carry no copyright (RA 8293 §176); cited anyway.
-- **`basemap_utm.npy`** is a reprojected copy of Esri Light Gray Canvas tiles rendered for chart backgrounds (`prep_layers.py`). Esri tiles are used in the live maps with attribution, but bulk-stored tile copies should not ship in a public repo; it is flagged for regeneration from the OSM/Copernicus layers above.
+- **Chart backgrounds are synthesized, not stored Esri tiles.** `basemap_utm.npy` (once a reprojected copy of Esri Light Gray Canvas) no longer ships: it is gitignored, `prep_layers.py` builds the canvas from the Copernicus hillshade and land/water masks, and `data_core.synth_basemap` renders it at runtime when the file is absent. Esri imagery stays in the live Leaflet maps only, with attribution, as their terms require.
 - **Personal data never ships**: runtime CSVs that could hold names or numbers (requests, contacts, exercise state) are gitignored and stay on the operator's machine; nothing person-identifiable is distributed under any license.
 

@@ -20,7 +20,7 @@ git push -u origin main
 Runtime CSVs (requests, shelters, ui_prefs), raw downloads and all `*.tif` are already excluded by
 `.gitignore`; personal information from exercises never leaves the laptop.
 
-What ships and why: the running app needs only `app/`, `data/app_layers/` (~25 MB),
+What ships and why: the running app needs only `app/`, `data/app_layers/` (~20 MB),
 `assets/` (<1 MB), the dashboard chart in `outputs/charts/`, plus docs. Everything under
 `data/raw/` and `data/processed/` (including all `*.tif`) is excluded by `.gitignore`; the
 notebook (`ClimateShield_Dagupan_Analysis.ipynb` + `nbcells_part*.py`) can rebuild any of it locally from the sources in

@@ -27,6 +27,9 @@ data/app_layers/resources.csv
 data/app_layers/response_directory.csv
 data/app_layers/dem_override.json
 data/app_layers/_*backup/
+# Esri-derived raster: their terms allow live map use, not shipped copies - synthesized at
+# runtime instead (data_core.synth_basemap); keep any locally regenerated file out of the repo
+data/app_layers/basemap_utm.npy
 # user-entered logs (may contain personal info)
 data/app_layers/crowd_reports.csv
 data/app_layers/pantal_gauge_log.csv

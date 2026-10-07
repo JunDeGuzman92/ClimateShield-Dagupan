@@ -227,30 +227,19 @@ with open(OUT / "street_graph.pkl", "wb") as f:
 print(f"street graph: {len(_gnodes):,} nodes, "
       f"{sum(len(v) for v in _gedges.values()) // 2:,} undirected segments")
 
-import contextily as cx
-from rasterio.transform import from_bounds as _tfb
-
-merc = city_utm.to_crs("EPSG:3857").total_bounds
-img, ext = cx.bounds2img(merc[0], merc[1], merc[2], merc[3],
-                         source=cx.providers.Esri.WorldGrayCanvas, zoom=14)
-if img.ndim == 3 and img.shape[2] > 3:
-    img = img[:, :, :3]
-if img.dtype != np.uint8:
-    img = (img * 255).astype("uint8")
-src_tr = _tfb(ext[0], ext[2], ext[1], ext[3], img.shape[1], img.shape[0])
-basemap_utm = np.zeros((utm_h, utm_w, 3), dtype="uint8")
-for k in range(3):
-    dst = np.zeros((utm_h, utm_w), dtype="float32")
-    reproject(img[:, :, k].astype("float32"), dst,
-              src_transform=src_tr, src_crs="EPSG:3857",
-              dst_transform=utm_transform, dst_crs=DST_CRS,
-              resampling=Resampling.bilinear)
-    basemap_utm[:, :, k] = dst.astype("uint8")
-empty = (basemap_utm == 0).all(axis=2)
-basemap_utm[empty] = (245, 239, 227)
+# chart-background canvas, synthesized from layers this repo may distribute
+# (Copernicus hillshade + land/water/river masks). The earlier version bulk-downloaded
+# Esri Light Gray Canvas tiles; Esri's terms allow live use with attribution, not stored
+# copies, so the raster stopped shipping with the repo (docs/SOURCES.md section 9).
+_rel = hillshade.astype("float32") / 255.0
+basemap_utm = np.array([245, 239, 227], dtype="float32")[None, None, :] * \
+    (0.80 + 0.20 * _rel)[:, :, None]
+_water = ((city_mask > 0) & (land_mask == 0)) | (dist_river_m <= 0) | (dist_coast_m <= 0)
+basemap_utm[_water] = np.array([199, 209, 220], dtype="float32")[None, :] * \
+    (0.90 + 0.10 * np.clip(_rel[_water], 0, 1))[:, None]
+basemap_utm = np.clip(basemap_utm, 0, 255).astype("uint8")
 np.save(OUT / "basemap_utm.npy", basemap_utm)
-print(f"basemap rendered from Esri World Gray Canvas ({img.shape[1]}x{img.shape[0]} tiles img, "
-      f"{int(empty.sum()):,} empty cells filled beige)")
+print(f"basemap synthesized from hillshade + land/water masks ({int(_water.sum()):,} water cells)")
 
 meta = {
     "utm_transform": [utm_transform.a, utm_transform.b, utm_transform.c, utm_transform.d, utm_transform.e, utm_transform.f],

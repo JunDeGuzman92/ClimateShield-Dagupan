@@ -26,9 +26,28 @@ _alias = {
 
 def _norm(s):
     s = str(s).lower().strip()
-    for tok in ["barangay", "brgy.", "brgy", "district", "poblacion"]:
+    for tok in ["barangay", "brgy.", "brgy", "poblacion"]:
         s = s.replace(tok, "")
     return " ".join(s.split())
+
+
+def synth_basemap(L):
+    """Chart-background canvas built from layers that may lawfully ship in the repo
+    (Copernicus hillshade + land/river/coast masks). Replaces the old stored copy of
+    Esri Light Gray Canvas tiles: their terms allow live use with attribution, but not
+    bulk storage or redistribution (docs/SOURCES.md section 9)."""
+    hs = np.asarray(L.hillshade, dtype=float)
+    lo, hi = float(np.nanmin(hs)), float(np.nanmax(hs))
+    rel = (hs - lo) / (hi - lo) if hi > lo + 1e-9 else np.zeros_like(hs)
+    canvas = np.array([245, 239, 227], dtype=float)[None, None, :] * (0.80 + 0.20 * rel)[:, :, None]
+    try:
+        city = np.load(LAYERS / "city_mask.npy").astype(bool)
+        water = (city & ~L.land_mask) | (L.dist_river <= 0) | (L.dist_coast <= 0)
+    except Exception:
+        water = ~L.land_mask
+    canvas[water] = np.array([199, 209, 220], dtype=float)[None, :] * \
+        (0.90 + 0.10 * np.clip(rel[water], 0, 1))[:, None]
+    return np.clip(canvas, 0, 255).astype(np.uint8)
 
 
 class Layers:
@@ -45,7 +64,10 @@ class Layers:
         self.dist_coast = np.load(LAYERS / "dist_coast.npy")
         self.pop = np.load(LAYERS / "pop_utm.npy")
         self.hillshade = np.load(LAYERS / "hillshade.npy")
-        self.basemap = np.load(LAYERS / "basemap_utm.npy")
+        try:
+            self.basemap = np.load(LAYERS / "basemap_utm.npy")
+        except Exception:
+            self.basemap = synth_basemap(self)
         cal = np.load(LAYERS / "elev_calibration.npz")
         self.elev_sorted = cal["sorted"]
         self.daily = pd.read_csv(LAYERS / "daily.csv", parse_dates=["date"]).set_index("date")
