@@ -74,12 +74,28 @@ def test_heat_simulator_page_renders_end_to_end():
     caps = " ".join(c.value for c in at.caption)
     assert "Stay-alive today" in md or "Protocol at this hour" in md
     assert "911" in md, "verified national emergency lines must appear"
+    # header layout: controls left, dashboard + day curve fill the right pane (it used to be blank)
+    assert "Day dashboard" in md, "right-hand dashboard pane missing"
+    assert "Day curve unavailable" not in md, "day curve failed to render"
+    want = {"Hottest barangay now", "Residents in DANGER-band areas",
+            "Population within 2.5 km of cooling", "Cooling points open"}
+    assert want <= set(m.label for m in at.metric), "dashboard metrics moved out of the header"
     # recorded-day picker → heat-specific scenario
     st = next(s for s in at.selectbox if s.key == "heat_story")
     st.set_value("heatwave_brownout"); at.run()
     assert not at.exception
     slat = next((s for s in at.slider if s.key == "hx_tmax"), None)  # own-day controls appear in that mode
     # switching to live forecast mode is guarded (no network in tests) — recorded is the smoke path
+
+
+def test_heat_day_time_lapse_film_renders_after_gate():
+    """Regression: the Day time-lapse crashed with 'module mapfilm has no attribute STORM_STRIP_PX'."""
+    from conftest import boot, button, goto, nav_labels, no_exc
+    at = goto(boot(), nav_labels()[2])
+    no_exc(at)
+    button(at, startswith="▶ Play").click()
+    at.run()
+    no_exc(at)   # before the fix this raised AttributeError on the film strip height
 
 
 def test_walkthrough_and_telemetry_indices_after_nav_insert():

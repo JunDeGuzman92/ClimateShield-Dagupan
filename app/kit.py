@@ -300,7 +300,7 @@ def brgy_layer(L, m, choro=None, highlight=None):
 
 def make_city_map(L, depth=None, focus=None, crowd=True, fac=True,
                   center=(16.0432, 120.3342), zoom=13, W_cut=None, vmax=None, legend=True,
-                  boundaries=True, choro=None, highlight=None):
+                  boundaries=True, choro=None, highlight=None, extras=None):
     import folium
     m = folium.Map(location=center, zoom_start=zoom, tiles=None)
     folium.TileLayer(tiles=ESRI_GRAY[0], attr=ESRI_GRAY[1], name="map (Esri light)").add_to(m)
@@ -381,6 +381,8 @@ def make_city_map(L, depth=None, focus=None, crowd=True, fac=True,
             'background:linear-gradient(90deg,#ffffd9,#c7e9b4,#41b6c4,#081d58);"></div>'
             '<div style="display:flex;justify-content:space-between;font-size:9px;color:#6b7280;">'
             '<span>shallow</span><span>deep</span></div></div>'))
+    if extras is not None:
+        extras(m)
     folium.LayerControl(collapsed=False).add_to(m)
     return m
 

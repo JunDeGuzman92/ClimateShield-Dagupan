@@ -303,6 +303,10 @@ def _physics(L, state, h):
             notes.append(f"⚠ {m['unit_name']} went down before reaching {m['req']} — back in the queue")
             continue
         if rstat_req.get(m["req"]) == "resolved":
+            if rstat.get(uid) == "maintenance":
+                del missions[uid]
+                notes.append(f"⚠ {m['unit_name']} down — request served by others")
+                continue
             ops.assign_resource(uid, "", status="available")
             del missions[uid]
             notes.append(f"✅ {m['unit_name']} freed — {m['req']} resolved")
@@ -333,8 +337,13 @@ def _physics(L, state, h):
                 m["load"] = 0
                 if rem <= 0:
                     _stamp_request(m["req"], status="resolved", resolved_at=rsp._now(), updated_at=rsp._now())
-                    ops.assign_resource(uid, "", status="returning")
-                    m["phase"], m["eta_home"] = "home", h + m["travel_h"]
+                    if rstat.get(uid) == "maintenance":
+                        # the unit went down (E5) on this trip — it must not come back as "returning"
+                        del missions[uid]
+                        notes.append(f"⚠ {m['unit_name']} down after drop-off — stays out of service")
+                    else:
+                        ops.assign_resource(uid, "", status="returning")
+                        m["phase"], m["eta_home"] = "home", h + m["travel_h"]
                 elif rstat.get(uid) == "maintenance":
                     del missions[uid]
                     notes.append(f"⚠ {m['unit_name']} down after drop-off — not making another trip")
@@ -343,9 +352,13 @@ def _physics(L, state, h):
             else:
                 stats["trips"] = int(stats.get("trips", 0)) + 1
                 _stamp_request(m["req"], status="resolved", resolved_at=rsp._now(), updated_at=rsp._now())
-                ops.assign_resource(uid, "", status="returning")
-                m["phase"], m["eta_home"] = "home", h + m["travel_h"]
-                notes.append(f"✅ {m['unit_name']} finished at {m['req']}")
+                if rstat.get(uid) == "maintenance":
+                    del missions[uid]
+                    notes.append(f"⚠ {m['unit_name']} down at {m['req']} — stays out of service")
+                else:
+                    ops.assign_resource(uid, "", status="returning")
+                    m["phase"], m["eta_home"] = "home", h + m["travel_h"]
+                    notes.append(f"✅ {m['unit_name']} finished at {m['req']}")
         elif m["phase"] == "home" and h >= m["eta_home"]:
             if rstat.get(uid) != "maintenance":
                 ops.assign_resource(uid, "", status="available")
@@ -555,15 +568,23 @@ def debrief_figure(L, state, sc=None):
     ax.set_title(f"Run timeline — {state.get('team', 'Team')} · {story['title']}", fontsize=11, color="#1f2937")
     reqs = rsp.load_requests()
     if len(reqs):
-        reqs = reqs[pd.to_datetime(reqs["logged_at"], errors="coerce") >= started - pd.Timedelta(minutes=1)]
+        logged = pd.to_datetime(reqs["logged_at"], errors="coerce")
+        # run window only: requests logged after stop belong to a later session, and one marker
+        # outside the axis stretches the tight-bbox crop to hundreds of millions of pixels
+        reqs = reqs[(logged >= started - pd.Timedelta(minutes=1)) & (logged <= end + pd.Timedelta(seconds=1))]
+
+    def mark(x, y, **kw):
+        if np.isfinite(x) and -0.5 <= x <= total_min + 0.5:
+            ax.plot(x, y, **kw)
+
     for _, r in reqs.iterrows():
-        x = mins(r["logged_at"])
-        ax.plot(x, 0.02, marker="v", color="#6b7280", ms=7, clip_on=False)
+        mark(mins(r["logged_at"]), 0.02, marker="v", color="#6b7280", ms=7, clip_on=False)
         if r.get("assigned_at"):
-            ax.plot(mins(r["assigned_at"]), 0.06, marker="o", color="#f59e0b", ms=6, clip_on=False)
+            mark(mins(r["assigned_at"]), 0.06, marker="o", color="#f59e0b", ms=6, clip_on=False)
         if r.get("resolved_at"):
-            ax.plot(mins(r["resolved_at"]), 0.10, marker="*", color="#16a34a", ms=11, clip_on=False)
+            mark(mins(r["resolved_at"]), 0.10, marker="*", color="#16a34a", ms=11, clip_on=False)
     fired = [e for e in state.get("events", []) if e.get("fired_at")]
+    fired = [e for e in fired if np.isfinite(x := mins(e["fired_at"])) and 0 <= x <= total_min]
     for i, e in enumerate(fired):
         x = mins(e["fired_at"])
         ax.axvline(x, color="#dc2626", lw=0.8, ls=":", alpha=0.8)
@@ -611,5 +632,12 @@ def debrief_figure(L, state, sc=None):
     fig.text(0.02, 0.01, "ClimateShield-Dagupan exercise debrief · simulator only · "
              f"storm hour {state.get('final_hour', 0):.0f} at ×{speed:g}", fontsize=7.5, color="#6b7280")
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=140, bbox_inches="tight", facecolor="white")
+    # one artist outside the axis multiplies the tight crop until a single render allocates GBs
+    # (367M px / ~10 s seen from a request logged after the run) - crop only while it stays sane
+    try:
+        w, h = fig.get_tightbbox(fig.canvas.get_renderer()).size
+        crop = "tight" if w * h * 140 ** 2 <= 40e6 else None
+    except Exception:
+        crop = "tight"
+    fig.savefig(buf, format="png", dpi=140, bbox_inches=crop, facecolor="white")
     return fig, buf.getvalue()

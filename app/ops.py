@@ -238,3 +238,24 @@ def drill_messages(pilot_barangays, n=6, seed=None):
         b = rnd.choice(pilot_barangays)
         out.append((f"Simulated resident #{rnd.randint(100, 999)}", tpl.format(b=b.upper(), n=rnd.randint(2, 12))))
     return out
+
+
+# heat-day texts: same parser (trigger word + barangay + count + need keyword), different failure mode
+HEAT_DRILL_LINES = [
+    "SAKLOLO {b} {n} GAMOT hihilo sa init sa kalsada",
+    "TULONG {b} {n} WATER uhaw ang matatanda sa bahay",
+    "HELP {b} {n} SHELTER walang electric init sa loob",
+    "SAKLOLO {b} {n} MED senior nahimatay sa palengke",
+    "TULONG {b} {n} PAGKAIN tubig sa barangay hall init",
+]
+
+
+def heat_drill_messages(pilot_barangays, n=6, seed=None):
+    """Heat-flavoured inbound texts (heat cramps, brownout, thirst) — simulator only, never sent."""
+    rnd = random.Random(seed)
+    out = []
+    for i in range(n):
+        tpl = rnd.choice(HEAT_DRILL_LINES)
+        b = rnd.choice(pilot_barangays)
+        out.append((f"Simulated resident #{rnd.randint(100, 999)}", tpl.format(b=b.upper(), n=rnd.randint(2, 10))))
+    return out

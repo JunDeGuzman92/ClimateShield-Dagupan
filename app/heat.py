@@ -17,6 +17,7 @@ Sources (reused on the Methods page):
 """
 import json
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -25,7 +26,7 @@ import pandas as pd
 LAY = Path(__file__).resolve().parents[1] / "data" / "app_layers"
 COOLING = LAY / "cooling.csv"
 COOL_COLS = ["center_id", "name", "kind", "capacity", "headcount", "status", "barangay_hint",
-             "lat", "lon", "contact", "updated_at"]
+             "lat", "lon", "contact", "updated_at", "source"]
 COOL_STATUS = ["closed", "open", "full"]
 COOL_KINDS = ["school", "hall", "church / worship", "health post", "mall / commercial"]
 
@@ -196,11 +197,64 @@ def seed_cooling_from_shelters(L, kinds=("school",)):
             capacity=r.get("capacity", ""), headcount=0,
             status="open" if r["status"] == "open" else "full",
             barangay_hint=r.get("barangay_hint", ""), lat=r.get("lat", ""), lon=r.get("lon", ""),
-            contact="", updated_at=_now())])],
+            contact="", source="shelter")])],
             ignore_index=True)
         added += 1
     save_cooling(df)
     return added
+
+
+PRACTICE_KINDS = ("school", "barangay/city hall", "community centre", "designated shelter")
+PRACTICE_KIND_MAP = {"school": "school", "barangay/city hall": "hall", "community centre": "hall",
+                     "designated shelter": "hall"}
+
+
+def seed_practice_cooling(L, kinds=PRACTICE_KINDS):
+    """One-click practice setup: the shelter roster becomes *candidate* cooling points (source='practice').
+
+    Registers them 'open' so every heat map, ring and coverage number has something to draw, but the row keeps
+    source='practice' and every map tooltip says 'practice candidate' — a planning picture, not a claim that
+    these sites are open and staffed today.
+    """
+    import ops
+    sh = ops.load_shelters(L)
+    df = load_cooling()
+    have = set(df["name"].astype(str)) if len(df) else set()
+    added = 0
+    sel = sh[sh["kind"].isin(kinds)] if "kind" in sh else sh.iloc[0:0]
+    for _, r in sel.iterrows():
+        if str(r["name"]) in have:
+            continue
+        df = pd.concat([df, pd.DataFrame([dict(
+            center_id=f"C{len(df) + 1:03d}", name=r["name"],
+            kind=PRACTICE_KIND_MAP.get(str(r.get("kind", "")), "hall"),
+            capacity=r.get("capacity", ""), headcount=0, status="open",
+            barangay_hint=r.get("barangay_hint", ""), lat=r.get("lat", ""), lon=r.get("lon", ""),
+            contact="", source="practice")])],
+            ignore_index=True)
+        added += 1
+    if added:
+        save_cooling(df)
+    return added
+
+
+def practice_count():
+    """How many registered points are practice candidates rather than verified/registered sites."""
+    df = load_cooling()
+    if not len(df):
+        return 0
+    if "source" not in df:
+        return 0
+    return int((df["source"].astype(str).str.strip() == "practice").sum())
+
+
+def cool_note(row):
+    """Tooltip suffix marking practice candidates on every cooling layer."""
+    try:
+        src = str(row.get("source", "") or "").strip()
+    except Exception:
+        src = ""
+    return " · practice candidate" if src == "practice" else ""
 
 
 def open_cooling(L):
@@ -398,5 +452,162 @@ def briefing_png(L, row, anchor, hi, cat, story_note, reach_row, lang="English")
     fig.savefig(buf, format="png", dpi=140, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return buf.getvalue()
+
+
+# ------------------------------------------------------- heat relief layers: water + shade (OSM)
+# Built by app/heatlayers.py from data/raw/osm_dagupan_features_raw.json, clipped to the city polygon.
+WATER_PTS_CSV = LAY / "heat_water_points.csv"
+WATER_AREAS_GJ = LAY / "heat_water_areas.geojson"
+SHADE_AREAS_GJ = LAY / "heat_shade.geojson"
+SHADE_TREES_CSV = LAY / "heat_shade_points.csv"
+LAYER_COLS = ["kind", "name", "lat", "lon"]
+COOL_COLOR = "#0e7490"
+
+
+@lru_cache(maxsize=4)
+def _layer_csv(path: Path):
+    """Read-only: kind/name/lat/lon rows (empty frame when the layer was never built)."""
+    if not path.exists():
+        return pd.DataFrame(columns=LAYER_COLS)
+    df = pd.read_csv(path)
+    for c in LAYER_COLS:
+        if c not in df:
+            df[c] = ""
+    return df[LAYER_COLS]
+
+
+@lru_cache(maxsize=2)
+def _layer_gj(path: Path):
+    """Read-only GeoJSON with a ready-made `label` property on every feature."""
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for feat in data.get("features", []):
+        p = feat.get("properties") or {}
+        name = str(p.get("name") or "").strip()
+        kind = str(p.get("kind") or "").strip()
+        p["label"] = f"{kind} — {name}" if name else kind
+        feat["properties"] = p
+    return data
+
+
+def water_points():
+    """Refilling stations, wells, fountains — drinkable relief water on a heat day."""
+    return _layer_csv(WATER_PTS_CSV)
+
+
+def water_areas():
+    """Ponds, fishponds and open water polygons (irrigation / non-potable)."""
+    return _layer_gj(WATER_AREAS_GJ)
+
+
+def shade_areas():
+    """Parks, grass, scrub, cemetery green and mangrove/wetland polygons (shade + cooling cover)."""
+    return _layer_gj(SHADE_AREAS_GJ)
+
+
+def shade_trees():
+    """Individually mapped shade trees."""
+    return _layer_csv(SHADE_TREES_CSV)
+
+
+# ----------------------------------------------------------------------------- map symbology
+def cool_icon(color=COOL_COLOR, size=17):
+    """Snowflake glyph with a white halo — reads as a cooling point on any basemap."""
+    import folium
+    return folium.DivIcon(
+        html=f'<div style="font-size:{size}px;line-height:1;color:{color};'
+             f'text-shadow:0 0 2px #fff,0 0 3px #fff,0 0 5px #fff,0 0 7px #fff;">❄</div>',
+        icon_size=(26, 26), icon_anchor=(13, 13), class_name="cs-cool-icon")
+
+
+def cool_marker(loc, tooltip, color=COOL_COLOR, size=17):
+    import folium
+    return folium.Marker(location=[float(loc[0]), float(loc[1])],
+                         icon=cool_icon(color, size), tooltip=tooltip)
+
+
+def cool_ring(loc, radius_m=2500):
+    """The 2.5 km walk radius, drawn faint and dotted so it never competes with the heat field."""
+    import folium
+    return folium.Circle(location=[float(loc[0]), float(loc[1])], radius=radius_m, color=COOL_COLOR,
+                         weight=1, opacity=0.3, fill=False, dash_array="1 9")
+
+
+def health_marker(loc, tooltip):
+    """Green first-aid kit pin — deliberately not a red dot (red already means heat danger)."""
+    import folium
+    return folium.Marker(location=[float(loc[0]), float(loc[1])],
+                         icon=folium.Icon(color="green", icon="medkit", prefix="fa"), tooltip=tooltip)
+
+
+def water_marker(loc, tooltip):
+    """Blue droplet pin for a mapped water source."""
+    import folium
+    return folium.Marker(location=[float(loc[0]), float(loc[1])],
+                         icon=folium.Icon(color="blue", icon="tint", prefix="fa"), tooltip=tooltip)
+
+
+def shade_layer(m, name="🌳 shade & green areas"):
+    """Parks/forest/mangrove polygons + individual shade trees, as one toggleable layer."""
+    import folium
+    grp = folium.FeatureGroup(name=name, show=True)
+    areas = shade_areas()
+    if areas and areas.get("features"):
+        folium.GeoJson(
+            areas,
+            style_function=lambda _: {"color": "#15803d", "weight": 1, "opacity": 0.5,
+                                      "fillColor": "#22c55e", "fillOpacity": 0.18},
+            tooltip=folium.GeoJsonTooltip(fields=["label"], aliases=[""]),
+        ).add_to(grp)
+    for _, t in shade_trees().iterrows():
+        try:
+            la, lo = float(t["lat"]), float(t["lon"])
+        except (TypeError, ValueError):
+            continue
+        folium.Marker(
+            [la, lo],
+            icon=folium.DivIcon(html='<div style="font-size:13px;line-height:1;'
+                                     'text-shadow:0 0 3px #fff,0 0 4px #fff;">🌳</div>',
+                                icon_size=(18, 18), icon_anchor=(9, 9), class_name="cs-shade-icon"),
+            tooltip=f"shade tree{' — ' + str(t['name']) if t.get('name') else ''}",
+        ).add_to(grp)
+    m.add_child(grp)
+    return grp
+
+
+def water_layer(m, L=None, name="💧 water sources", rivers=True):
+    """Rivers/canals (irrigation), ponds & fishponds, refilling stations, wells — heat-day water.
+
+    `rivers=False` skips the channel lines when the base map already draws them.
+    """
+    import folium
+    grp = folium.FeatureGroup(name=name, show=True)
+    if L is not None and rivers:
+        for r in L.rivers:
+            if r.get("class") not in ("river", "canal"):
+                continue
+            folium.PolyLine([(la, lo) for lo, la in r["ll"]],
+                            color="#0ea5e9", weight=2.0 if r["class"] == "river" else 1.2,
+                            opacity=0.5,
+                            tooltip=f"{r['class']} — open water / irrigation channel").add_to(grp)
+    areas = water_areas()
+    if areas and areas.get("features"):
+        folium.GeoJson(
+            areas,
+            style_function=lambda _: {"color": "#0284c7", "weight": 1, "opacity": 0.45,
+                                      "fillColor": "#7dd3fc", "fillOpacity": 0.16},
+            tooltip=folium.GeoJsonTooltip(fields=["label"], aliases=[""]),
+        ).add_to(grp)
+    for _, p in water_points().iterrows():
+        try:
+            la, lo = float(p["lat"]), float(p["lon"])
+        except (TypeError, ValueError):
+            continue
+        kind = str(p.get("kind") or "water source")
+        nm = str(p.get("name") or "").strip()
+        water_marker([la, lo], f"{kind}{' — ' + nm if nm else ''} · heat-day drinking water").add_to(grp)
+    m.add_child(grp)
+    return grp
 
 
