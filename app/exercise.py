@@ -507,6 +507,23 @@ def history():
     return pd.read_csv(HISTORY) if HISTORY.exists() else pd.DataFrame()
 
 
+def history_summary():
+    """(None) or dict: hist (chronological df), run numbers, best (row dict), per_team, trend."""
+    h = history()
+    if not len(h):
+        return None
+    h = h.copy()
+    h["finished"] = pd.to_datetime(h["finished"], errors="coerce")
+    h["score"] = pd.to_numeric(h["score"], errors="coerce")
+    h = h.dropna(subset=["score"]).sort_values("finished").reset_index(drop=True)
+    if not len(h):
+        return None
+    best = h.loc[h["score"].idxmax()].to_dict()
+    per_team = (h.groupby("team", dropna=False)["score"]
+                .agg(best="max", runs="count").reset_index())
+    return dict(hist=h, n=len(h), best=best, per_team=per_team)
+
+
 # ----------------------------------------------------------------------------- debrief (item 10)
 def debrief_figure(L, state, sc=None):
     """One-page run timeline: water level, requests logged/assigned/resolved, complications fired.

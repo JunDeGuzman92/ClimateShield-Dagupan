@@ -30,6 +30,8 @@ def test_deck_replay_tab():
     rd = next(s for s in at.radio if s.key == "rp_rd")
     rd.set_value("prepared"); at.run(); no_exc(at)
     assert any("469 mm" in c.value for c in at.caption), "selected event's note not shown"
+    # the film is gated: tiles show, the animation loads only after the Play tap
+    button(at, label="▶ Play the storm film").click(); at.run(); no_exc(at)
     assert any("Land flooded" in m.value for m in at.markdown), "replay summary tiles missing"
     assert any("Peak water" in m.value for m in at.markdown)
 

@@ -149,6 +149,45 @@ class Layers:
         except Exception as e:
             self.re_anchored = [("anchor containment check skipped", str(e)[:80])]
 
+        # ---- LGU manual anchors (data/app_layers/manual_anchors.json · barangay → {lon, lat})
+        # For barangays with no in-city OSM place node (Barangay II) or a mis-matched one: the LGU
+        # gives us one core coordinate and everything derived from it is recomputed on the spot.
+        try:
+            ma_path = LAYERS / "manual_anchors.json"
+            if ma_path.exists():
+                manual = json.load(open(ma_path, encoding="utf-8"))
+            else:
+                manual = {}
+            if not hasattr(self, "re_anchored"):
+                self.re_anchored = []
+            for a_ in self.brgy_anchors:
+                ov = (manual or {}).get(a_["barangay"])
+                if not ov or "lon" not in ov or "lat" not in ov:
+                    continue
+                lo, la = float(ov["lon"]), float(ov["lat"])
+                a_["anchor"] = {"lon": lo, "lat": la}
+                row_i = self.brgy.index[self.brgy["barangay"] == a_["barangay"]]
+                if len(row_i):
+                    i = row_i[0]
+                    x, y = self.to_utm(lo, la)
+                    ci = int(np.clip(round((x - self.transform.c) / 30 - 0.5), 0, self.w - 1))
+                    ri = int(np.clip(round((self.transform.f - y) / 30 - 0.5), 0, self.h - 1))
+                    self.brgy.loc[i, "elev_m"] = float(self.dem[ri, ci])
+                    self.brgy.loc[i, "dist_river_m"] = float(self.dist_river[ri, ci])
+                    r0, c0 = max(0, ri - 10), max(0, ci - 10)
+                    win = self.susc[r0:ri + 11, c0:ci + 11]
+                    win = win[np.isfinite(win) & self.land_mask[r0:ri + 11, c0:ci + 11]]
+                    self.brgy.loc[i, "mean_susc_300m"] = float(win.mean()) if win.size else np.nan
+                    bx = np.array([b["lon"] for b in self.buildings])
+                    by = np.array([b["lat"] for b in self.buildings])
+                    phi = np.radians((by + la) / 2.0)
+                    d_m = 6371000.0 * np.sqrt(np.radians(by - la) ** 2
+                                               + (np.radians(bx - lo) * np.cos(phi)) ** 2)
+                    self.brgy.loc[i, "bldg_600m"] = int((d_m <= 600).sum())
+                self.re_anchored.append((a_["barangay"], "manual LGU anchor applied"))
+        except Exception as e:
+            self.re_anchored.append(("manual anchor load skipped", str(e)[:80]))
+
         # ---- barangay boundary masks (see brgypoly.py: official file or derived interim)
         self.brgy_cells = None
         self.boundary_source = "anchor windows only (no boundary build)"

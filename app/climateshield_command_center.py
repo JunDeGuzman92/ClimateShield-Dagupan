@@ -27,6 +27,7 @@ import ops
 import gauges
 import demimport
 import exercise
+import feedback
 import replay
 import validation
 
@@ -327,10 +328,29 @@ def factor_tile(label, value, sub=""):
 STORM_STRIP_PX = 186  # caption + stat tiles + timeline strip under the map
 
 
-def show_storm(key, height=500, params=None):
+def _set_flag(k):
+    st.session_state[k] = True
+
+
+def _gate(gate_key, note):
+    """Play gate for heavy storm films. True → render; False → button shown instead.
+
+    The film frame-set is a 2–5 MB download — on phones we ship it only after an explicit tap
+    (state tiles and text stay available either way)."""
+    if not gate_key or st.session_state.get(gate_key):
+        return True
+    st.button("▶ Play the storm film", type="primary", use_container_width=True,
+              key=f"g_{gate_key}", on_click=_set_flag, args=(gate_key,),
+              help="The film loads ~2–5 MB of animation, so it stays off until you ask for it.")
+    st.caption(note)
+    return False
+
+
+def show_storm(key, height=500, params=None, gate=None):
     """height = map height in px; the stats strip is drawn below it, never over the map."""
     html, s = storm_html(key, params, height)
-    components.html(html, height=height + STORM_STRIP_PX, scrolling=False)
+    if _gate(gate, "Tiles above are live; the animated film loads on your tap (≈2–5 MB)."):
+        components.html(html, height=height + STORM_STRIP_PX, scrolling=False)
     return s
 
 
@@ -697,6 +717,99 @@ if PREFS.get("kiosk"):
     render_wall()
     st.stop()
 
+# ----------------------------------------------------------------- facilitator second screen (?facilitator=1)
+@st.fragment(run_every=5)
+def _fragment_facilitator():
+    """Projector view for drills — storm clock, event feed, live score. Second screen: the operator
+    works the queue on the Response page while this runs on the room's display."""
+    st.markdown("""<style>
+    [data-testid="stSidebar"] { display:none !important; }
+    [data-testid="stHeader"] { display:none !important; }
+    .block-container { padding-top:1.1rem !important; max-width:1700px !important; }
+    .cs-fhuge { font-size:4.4rem; font-weight:800; line-height:1; letter-spacing:-0.02em; }
+    .cs-fbig  { font-size:2.4rem; font-weight:700; line-height:1.1; }
+    .cs-fmed  { font-size:1.25rem; font-weight:600; }
+    .cs-fhdr  { font-size:1.05rem; color:#6b7280; }
+    .cs-fgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+    .cs-fcard { border:1px solid #e5e7eb; border-radius:14px; padding:10px 16px; background:#fff;
+                box-shadow:0 2px 8px rgba(16,24,40,.07); text-align:left; }
+    .cs-fcard span { display:block; font-size:.8rem; text-transform:uppercase; letter-spacing:.08em; color:#6b7280; font-weight:700; }
+    </style>""", unsafe_allow_html=True)
+    state = exercise.load()
+    reqs = rsp.load_requests()
+    shel = ops.load_shelters(L)
+    rs = ops.load_resources()
+    shel_hc = int(pd.to_numeric(shel["headcount"], errors="coerce").fillna(0).sum())
+    miss = list((state.get("missions") or {}).values())
+    aboard = sum(m.get("load") or 0 for m in miss if m["phase"] == "back")
+    waiting = exercise.people_remaining(state, reqs)
+    open_n = int((reqs["status"] != "resolved").sum()) if len(reqs) else 0
+    units_moving = len(miss)
+
+    h1, h2 = st.columns([3.4, 1])
+    h1.markdown("<span class='cs-fhdr'>CLIMATESHIELD · FACILITATOR SCREEN · simulator only — "
+                "shares this exercise with the operator console</span>", unsafe_allow_html=True)
+    h2.markdown("<a href='?' style='font-size:1rem;'>→ operator console</a>", unsafe_allow_html=True)
+
+    if not state.get("running"):
+        st.markdown("<div class='cs-fhuge'>NO EXERCISE RUNNING</div>", unsafe_allow_html=True)
+        st.markdown("<div class='cs-fmed'>Start one from the Response & Dispatch page "
+                    "(🎯 Timed exercise → ▶ Start).</div>", unsafe_allow_html=True)
+        sc = state.get("final_score")
+        if sc:
+            st.markdown(f"<div class='cs-fbig'>Last run — {state.get('team')}: "
+                        f"{sc['total']:.0f}/100 (grade {sc['grade']})</div>", unsafe_allow_html=True)
+        return
+
+    story = state["story"]
+    h = exercise.sim_hour(state)
+    max_h = float(state.get("max_h", 40.0))
+    W = exercise.water_at(L, story, h)
+    sc = exercise.score(L, state)
+    grade_col = {"A": "#15803d", "B": "#4d7c0f", "C": "#b45309", "D": "#b91c1c", "E": "#7f1d1d"}.get(sc["grade"], "#6b7280")
+
+    c1, c2, c3 = st.columns([1.35, 1, 1.9])
+    c1.markdown(f"<div class='cs-fhuge'>{h:,.0f} <span class='cs-fmed'>/ {max_h:,.0f} h</span></div>",
+                unsafe_allow_html=True)
+    c1.markdown(f"<div class='cs-fmed'>×{state['speed']:g} speed</div>", unsafe_allow_html=True)
+    c2.markdown("<div class='cs-fhdr'>WATER LEVEL</div>", unsafe_allow_html=True)
+    c2.markdown(f"<div class='cs-fhuge' style='color:#2563eb;'>"
+                + ("dry" if W <= 0 else f"+{W:.2f} m") + "</div>", unsafe_allow_html=True)
+    c2.markdown(f"<div class='cs-fmed'>land flooded {L.flooded_share(W):.0f}%</div>", unsafe_allow_html=True)
+    c3.markdown(f"<div class='cs-fbig'>{state['team']} · {story['title']}</div>", unsafe_allow_html=True)
+    c3.markdown(f"<div class='cs-fmed'>{exercise.caption_at(story, h)}</div>", unsafe_allow_html=True)
+    st.progress(min(h / max_h, 1.0))
+
+    st.markdown(f"""
+    <div class="cs-fgrid">
+      <div class="cs-fcard"><span>Live score</span><div class="cs-fbig" style="color:{grade_col};"
+        >{sc['total']:.0f}<span class="cs-fmed">/100 · {sc['grade']}</span></div></div>
+      <div class="cs-fcard"><span>People waiting for pickup</span><div class="cs-fbig">{waiting:,}</div></div>
+      <div class="cs-fcard"><span>Open requests</span><div class="cs-fbig">{open_n}</div></div>
+      <div class="cs-fcard"><span>Units moving</span><div class="cs-fbig">{units_moving}</div>
+        <div style="font-size:.95rem;color:#6b7280">{aboard} aboard boats now</div></div>
+      <div class="cs-fcard"><span>Evacuees sheltered</span><div class="cs-fbig">{shel_hc:,}</div></div>
+    </div>""", unsafe_allow_html=True)
+
+    fired = [e for e in state.get("events", []) if e.get("fired_at")]
+    st.markdown("<div class='cs-fhdr'>EVENT FEED</div>", unsafe_allow_html=True)
+    for e in reversed(fired[-5:]):
+        if e.get("acked_at"):
+            st.markdown(f"<div class='cs-fmed' style='color:#15803d;'>✔ h{e['h']:,.0f} · {e['title']}</div>",
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f"<div class='cs-fbig' style='color:#b91c1c;'>🔴 h{e['h']:,.0f} · {e['title']} — "
+                        f"<i>awaiting acknowledgment</i></div>", unsafe_allow_html=True)
+    nxt = next((e for e in state.get("events", []) if not e.get("fired_at")), None)
+    if nxt:
+        st.markdown(f"<div class='cs-fmed' style='color:#9ca3af;'>next complication ~h{nxt['h']:,.0f} · {nxt['title']}</div>",
+                    unsafe_allow_html=True)
+
+
+if st.query_params.get("facilitator") == "1" or st.session_state.get("facilitator"):
+    _fragment_facilitator()
+    st.stop()
+
 page = st.sidebar.radio("ClimateShield · Dagupan", NAV, label_visibility="collapsed", key="nav_page")
 st.sidebar.caption(f"{APP_VERSION} · community planning proxy · official warnings: PAGASA / CDRRMO")
 st.sidebar.markdown(f"""
@@ -766,7 +879,7 @@ if page == NAV[0]:
             flabels = {k: cinema.FLOOD_STORIES[k]["title"] for k in fkeys}
             fsel = st.radio("Scenario", fkeys, format_func=lambda k: flabels[k], horizontal=True,
                             label_visibility="collapsed", key="film_flood")
-            s = show_storm(fsel, height=500)
+            s = show_storm(fsel, height=500, gate="play_flood")
             other = "prepared" if fsel == "unprepared" else ("unprepared" if fsel == "prepared" else None)
             f1, f2, f3, f4, f5 = st.columns(5)
             f1.markdown(factor_tile("Peak water", f"+{s['peak_W']:.2f} m", f"hour {s['peak_hour']:.0f}"), unsafe_allow_html=True)
@@ -842,7 +955,7 @@ if page == NAV[0]:
                 c_surge = st.slider("Upstream surge pulse (+m)", 0.0, 0.6, 0.0, 0.05, key="cin_surge")
             params = dict(share=dc.SCENARIOS[c_scen], tide=float(c_tide), clog=c_clog / 100.0,
                           pumps=bool(c_pumps), warning_h=int(c_warn), surge=float(c_surge))
-            sc = show_storm("custom", height=480, params=params)
+            sc = show_storm("custom", height=480, params=params, gate="play_custom")
             g1, g2, g3, g4 = st.columns(4)
             g1.markdown(factor_tile("Peak water", f"+{sc['peak_W']:.2f} m", f"hour {sc['peak_hour']:.0f}"), unsafe_allow_html=True)
             g2.markdown(factor_tile("People in water", f"{sc['pop_in']:,.0f}", "at the peak"), unsafe_allow_html=True)
@@ -876,7 +989,8 @@ if page == NAV[0]:
                 st.plotly_chart(plotly_beige(figh, height=230), use_container_width=True, config={"displayModeBar": False})
             with r2:
                 r_html, rs = replay_storm_html(r_ev, r_rd, 500)
-                components.html(r_html, height=500 + STORM_STRIP_PX, scrolling=False)
+                if _gate("play_replay", "Tiles above describe the event; the animated film loads on your tap (≈2–5 MB)."):
+                    components.html(r_html, height=500 + STORM_STRIP_PX, scrolling=False)
                 q1, q2, q3, q4 = st.columns(4)
                 q1.markdown(factor_tile("Peak water", f"+{rs['peak_W']:.2f} m", rs['peak_label'] or f"hour {rs['peak_hour']:.0f}"), unsafe_allow_html=True)
                 q2.markdown(factor_tile("Land flooded", f"{rs['flooded_share']:.0f}%", f"{rs['pop_in']:,.0f} people in water"), unsafe_allow_html=True)
@@ -1062,7 +1176,7 @@ def _fragment_sim():
             s_warn = fc3.slider("Evacuation head start (h)", 0, 16, 2, 1, key="sim_film_warn")
             sp = dict(share=share, tide=float(tide), clog=s_clog / 100.0, pumps=bool(s_pumps),
                       warning_h=int(s_warn), surge=0.0)
-            sf = show_storm("custom", height=500, params=sp)
+            sf = show_storm("custom", height=500, params=sp, gate="play_sim")
             j1, j2, j3, j4 = st.columns(4)
             j1.markdown(factor_tile("Peak water", f"+{sf['peak_W']:.2f} m", f"hour {sf['peak_hour']:.0f}"), unsafe_allow_html=True)
             j2.markdown(factor_tile("People in water", f"{sf['pop_in']:,.0f}", "at the peak"), unsafe_allow_html=True)
@@ -1617,6 +1731,46 @@ def _fragment_wlk():
     st.progress((st.session_state["step"] + 1) / len(steps))
     step = st.session_state["step"]
 
+    # anchor tools — powered by the LGU when OSM has nothing useful for this barangay
+    with st.expander("📍 Anchor tools (LGU / drill settings)"):
+        tip = anchor if isinstance(anchor, dict) else None
+        hint = ("Tip: no in-city OSM place node matches this barangay. Enter the core coordinates once "
+                "(from a GPS reading of the barangay hall or an LGU map) and every map/valuation in this "
+                "walkthrough works immediately and survives restarts."
+                if anchor is None else
+                f"Current anchor: {tip['lon']:.5f}, {tip['lat']:.5f} (OSM place node). If it's misplaced, "
+                "override it with exact core coordinates below.")
+        try:
+            import shapely.geometry as _sg
+            import brgypoly as _bp_shim
+            city = _bp_shim._city_polygon_utm()
+            X, Y = L.to_utm(tip["lon"], tip["lat"]) if tip else (None, None)
+            hint += "" if (tip and city.contains(_sg.Point(X, Y))) else (" ⚠ anchor appears OUTSIDE the city — override below."
+                                                                        if tip else "")
+        except Exception:
+            pass
+        st.caption(hint)
+        ma_path = PREFS_PATH.parent / "manual_anchors.json"
+        st.caption("Coordinates stored locally in `data/app_layers/manual_anchors.json` — they survive app "
+                   "restarts. Clear and save empty values to return to the OSM anchor.")
+        man = json.loads(ma_path.read_text(encoding="utf-8")) if ma_path.exists() else {}
+        cur = (man or {}).get(sel) or (tip or {})
+        f1, f2, f3 = st.columns([1, 1, 1])
+        mv_lon = f1.number_input("Core longitude", value=float(cur.get("lon", 120.3343)), format="%.6f",
+                                 step=0.0001, key="ma_lon")
+        mv_lat = f2.number_input("Core latitude", value=float(cur.get("lat", 16.0425)), format="%.6f",
+                                 step=0.0001, key="ma_lat")
+        if f3.button("💾 Save anchor override", use_container_width=True,
+                      help="Writes the manual anchor and re-runs the walkthrough with it applied."):
+            mm = man or {}
+            if mv_lon and mv_lat and 120.0 < mv_lon < 120.6 and 15.8 < mv_lat < 16.3:
+                mm[sel] = {"lon": mv_lon, "lat": mv_lat}
+            else:
+                mm.pop(sel, None)
+            ma_path.write_text(json.dumps(mm, indent=1), encoding="utf-8")
+            st.toast("Anchor override saved — layers reload on next page view")
+            st.rerun()
+
     if step == 0:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Census 2020", f"{int(row['popn']):,}", "people")
@@ -1792,6 +1946,22 @@ def _fragment_wlk():
             st.caption("PDF export is unavailable on this machine (a Windows security policy blocks the PDF library) — "
                        "the briefing downloads as a printable image instead.")
         st.caption("Copy-paste ready for the barangay Facebook page, Viber group, or SMS blast.")
+        with st.expander("💬 Was this action card useful? (drill feedback)"):
+            st.caption("Takes 10 seconds: tells the project what actually helps in the field. Optional author = "
+                       "role only (e.g. 'kagawad', 'trainer').")
+            wf1, wf2 = st.columns([1, 1.4])
+            wf_rate = wf1.select_slider("Usefulness", options=[1, 2, 3, 4, 5], value=4, key="wt_fb_rate")
+            wf_who = wf1.text_input("Your role (optional)", key="wt_fb_who")
+            wf_change = wf2.text_input("One thing to change or add to this card", key="wt_fb_change")
+            if st.button("💾 Log card feedback", use_container_width=True):
+                feedback.log(context=f"walkthrough-card:{sel}", barangay=sel, rating=wf_rate,
+                             worked="card shown", change=wf_change, author=wf_who)
+                st.toast("Salamat — logged for the next card revision")
+            notes = feedback.list_notes(context=f"walkthrough-card:{sel}", limit=5)
+            if len(notes):
+                nd = notes.iloc[0]
+                st.caption(f"Last note ({nd['at'][:10]}): ⭐{nd['rating']} · "
+                           + (nd["change"] or "no suggested changes"))
 
 
     
@@ -1908,10 +2078,71 @@ def _fragment_exercise():
                                "reaction time.")
                 except Exception as e:
                     st.info(f"Debrief chart unavailable ({type(e).__name__}).")
-            hist = exercise.history()
-            if len(hist):
-                with st.expander(f"📊 Run history ({len(hist)}) — compare teams"):
-                    st.dataframe(hist, hide_index=True, use_container_width=True)
+            hist = exercise.history_summary()
+            if hist:
+                with st.expander(f"📊 Run history ({hist['n']} runs) — compare teams"):
+                    b = hist["best"]
+                    st.markdown(f"**Best run so far:** {b['team']} · {b['scenario']} · "
+                                f"**{b['score']:.0f}/100 (grade {b['grade']})** — "
+                                f"{b.get('resolved_pct', '')}% resolved · {b.get('people_waiting', '')} still waiting at stop")
+                    h = hist["hist"]
+                    colors = px.colors.qualitative.Set1
+                    figc = go.Figure()
+                    for j, tm in enumerate(sorted(set(h["team"]))):
+                        hs = h[h["team"] == tm]
+                        figc.add_trace(go.Scatter(
+                            x=list(hs["finished"].dt.strftime("%b %d %H:%M")),
+                            y=hs["score"], mode="lines+markers", name=str(tm),
+                            line=dict(color=colors[j % len(colors)]),
+                            customdata=hs[["grade", "scenario", "resolved_pct"]],
+                            hovertemplate="%{y:.0f}/100 · %{customdata[0]} · %{customdata[1]}<br>"
+                                          "resolved %{customdata[2]}%<extra>%{fullData.name}</extra>"))
+                    figc.add_hline(y=float(b["score"]), line_dash="dot",
+                                   annotation_text=f"best {b['score']:.0f} ({b['team']})")
+                    figc.update_layout(yaxis=dict(title="score / 100", range=[0, 105], gridcolor=PLOT_GRID),
+                                       xaxis=dict(gridcolor=PLOT_GRID), height=260,
+                                       margin=dict(l=10, r=10, t=8, b=10),
+                                       legend=dict(orientation="h", y=-0.35, font=dict(size=10)),
+                                       hovermode="closest")
+                    st.plotly_chart(plotly_beige(figc, height=260), use_container_width=True,
+                                    config={"displayModeBar": False})
+                    pt = hist["per_team"]
+                    st.dataframe(pt.rename(columns={"team": "Team", "best": "Best score", "runs": "Runs"})
+                                 .sort_values("Best score", ascending=False),
+                                 hide_index=True, use_container_width=True)
+                    with st.expander("All runs (table)"):
+                        st.dataframe(h.drop(columns=["finished"], errors="ignore"), hide_index=True,
+                                     use_container_width=True)
+                    st.caption("Runs are comparable when the storm, readiness factors and unit registration match — "
+                               "favorable storm draws inflate scores, judge runs by storm first.")
+            sfn = feedback.summary()
+            _fb_num = f" · avg {sfn['avg']:.1f}★ over {sfn['n']}" if sfn else ""
+            with st.expander(f"📋 Team debrief notes{_fb_num} — close the loop"):
+                fb1, fb2 = st.columns([1, 1.6])
+                with fb1:
+                    st.caption("What worked, what didn't — captured here so the next drill starts smarter. "
+                               "No names needed; role or team is enough.")
+                    fb_rate = st.select_slider("How ready did the team feel? (1 = scrambling, 5 = ready)",
+                                               options=[1, 2, 3, 4, 5], value=3, key="fb_rate")
+                    fb_team = st.text_input("Role / team (optional)", key="fb_team")
+                    fb_worked = st.text_input("What worked", key="fb_worked")
+                    fb_change = st.text_input("What to change next time", key="fb_change")
+                    if st.button("💾 Log debrief note", use_container_width=True):
+                        fb_context = f"exercise: {state.get('team', '—')} · {state['story']['title'][:40]}" \
+                            if state.get("running") or state.get("final_score") else "exercise"
+                        feedback.log(context=fb_context, barangay=PREFS["pilot"][0] if PREFS.get("pilot") else "",
+                                     rating=fb_rate, worked=fb_worked, change=fb_change, author=fb_team)
+                        st.toast("Debrief note logged — salamat!")
+                        st.rerun()
+                with fb2:
+                    notes = feedback.list_notes(limit=6)
+                    if len(notes):
+                        for _, nd in notes.iterrows():
+                            st.markdown(f"**⭐{nd['rating']} · {nd['context']}** {nd['at'][:10]} · {nd['author']}" +
+                                        (f"  \n✅ _{nd['worked']}_" if nd["worked"] else "") +
+                                        (f"  \n🔧 _{nd['change']}_" if nd["change"] else ""))
+                    else:
+                        st.caption("No notes yet — the first debrief after a drill goes here.")
             return
 
         story = state["story"]
@@ -1984,6 +2215,13 @@ def _fragment_response():
         W_r = exercise.water_at(L, _story, _h)
         st.caption(f"🎯 Exercise running — flood conditions follow storm hour {_h:,.1f}: "
                    + ("streets dry" if W_r <= 0 else f"water +{W_r:.2f} m") + ". Facility flood states update as it rises.")
+        if st.button("🖥 Facilitator screen — open on the room's projector",
+                     help="Opens a second tab with a large clock, event feed and live score. This tab stays interactive."):
+            components.html(
+                "<script>window.open(location.origin + location.pathname + '?facilitator=1', '_blank');</script>",
+                height=0)
+        st.caption("If a popup blocker stopped it, type this URL on the projector device: "
+                   "`http://<this-computer>:8501/?facilitator=1`")
     else:
         scen_r = st.selectbox("Assume flood conditions", list(dc.SCENARIOS.keys()), index=2, key="resp_scen")
         W_r = L.water_level_for_share(dc.SCENARIOS[scen_r]) + 0.20

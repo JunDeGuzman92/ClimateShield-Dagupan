@@ -23,6 +23,7 @@ RUNTIME_FILES = [
     "ui_prefs.json", "live_cache.json", "rescue_requests.csv", "sim_inbox.csv", "sim_outbox.csv", "sim_contacts.csv",
     "resources.csv", "shelters.csv", "response_directory.csv", "exercise.json", "exercise_history.csv",
     "crowd_reports.csv", "pantal_gauge_log.csv", "philsensors_cache.json",
+    "manual_anchors.json", "feedback_notes.csv",
 ]
 DEFAULT_PREFS = {
     "kiosk": False, "wall_seconds": 15, "last_cycle_ts": 0.0, "cycle_idx": 0, "lang": "English", "theme2": "day",
