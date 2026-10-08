@@ -14,6 +14,7 @@ The command center runs in any modern phone browser. No app-store install, no ne
 ## What works well on phones
 
 - Field Report (crowd reports). The dedicated page for tanods and banca crews: three taps (barangay, what you see, how deep), optional one-tap GPS that fills the barangay only, and no login. It writes the same crowd reports the maps pin.
+- Offline field pack. Open `https://jundeguzman92.github.io/ClimateShield-Dagupan/` once while online and add it to the home screen; after that it opens and takes reports with no signal at all, queuing them on the phone until data returns. One tap syncs the batch into the map.
 - Barangay walkthrough + action card: the copy button feeds straight into SMS / Viber / Facebook.
 - PDF briefings, downloaded from the phone and shared onward.
 
@@ -21,4 +22,5 @@ The command center runs in any modern phone browser. No app-store install, no ne
 
 - Maps are data-heavy; on slow connections wait for them to finish drawing.
 - If you open the app from the internet (not the same Wi-Fi), use the published URL and access code from `DEPLOYING.md`.
-- For true offline use inside a no-signal evacuation center, keep a copy of the app running on a laptop on site (a pocket Wi-Fi router is enough; no internet needed) and have phones connect to it. Full offline packaging (service workers, cached bundles) is not supported by Streamlit, so this local-server pattern is the workaround.
+- Streamlit itself always needs the network. For no-signal duty that is exactly what the offline field pack covers: the pack queues reports on the phone and syncs them the moment any connection appears, so the full command center never has to load inside the flood.
+- For a whole no-signal evacuation center, keep a copy of the app running on a laptop on site (a pocket Wi-Fi router is enough; no internet needed) and have phones connect to it.

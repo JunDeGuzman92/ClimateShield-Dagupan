@@ -1,13 +1,20 @@
 """Field Mode: a three-tap flood report for tanods and banca crews on their phones.
 
-Writes the same crowd_reports.csv the command-center maps already read, so a report filed
-at the water line shows up as a pin in the barangay hall within minutes (the flood map pins
-the latest flood-depth report per barangay, severity-coloured; see kit.crowd_pins).
+Two capture paths share one file:
+- The Streamlit page below, when the phone has data.
+- The offline field pack (a small PWA served from GitHub Pages, see field/ in the repo): it
+  queues reports in the phone's own storage with no signal, then syncs them here through an
+  ?fq= batch (base64 JSON, capped at MAX_QUEUE_SYNC) whenever connectivity returns.
+
+Both write the same crowd_reports.csv the command-center maps already read, so a report filed
+at the water line shows up as a pin in the barangay hall within minutes.
 
 Anonymous by design: no login, no name, no stored coordinates - the optional GPS tap only
 picks the nearest barangay from its OSM anchor and is then discarded.
 This page is community telemetry, never a rescue channel, and says so on screen.
 """
+import base64
+import json
 from datetime import date, datetime
 
 import pandas as pd
@@ -17,6 +24,8 @@ import streamlit.components.v1 as components
 import kit
 
 CR = kit.CR_CROWD
+FIELD_PWA_URL = "https://jundeguzman92.github.io/ClimateShield-Dagupan/"   # offline pack (GitHub Pages)
+MAX_QUEUE_SYNC = 12          # reports per offline batch; the PWA syncs newest first
 
 DEPTH_DETAILS = [
     "gutter-deep",
@@ -90,6 +99,88 @@ def append_report(barangay, rtype, detail, note="", path=CR):
     return new
 
 
+def _clean_note(s, limit=120):
+    """Notes end up inside map tooltips, so angle brackets never survive the trip."""
+    s = str(s or "").strip()[:limit]
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _sane_ts(ts):
+    try:
+        datetime.fromisoformat(str(ts))
+        return True
+    except Exception:
+        return False
+
+
+def ingest_queue(L, fq):
+    """Validate an offline batch (?fq= base64url JSON list) into crowd-report rows.
+
+    Everything the form could have sent is checked against the same vocabulary the app uses,
+    notes are escaped, the batch is capped, and timestamps fall back to now when a phone's
+    clock is missing or wrong. Returns the accepted rows (possibly empty), never raises.
+    """
+    try:
+        fq = str(fq).strip()
+        rows = json.loads(base64.urlsafe_b64decode(fq + "=" * (-len(fq) % 4)))
+        if not isinstance(rows, list):
+            return []
+    except Exception:
+        return []
+    brgys = set(L.brgy["barangay"].tolist())
+    types = {k[1] for k in FIELD_KINDS}
+    out = []
+    for r in rows[:MAX_QUEUE_SYNC]:
+        if not isinstance(r, dict):
+            continue
+        b, t, d = str(r.get("b", "")), str(r.get("t", "")), str(r.get("d", ""))
+        if b not in brgys or t not in types:
+            continue
+        valid = ROAD_DETAILS if t == "road state" else DEPTH_DETAILS
+        if d not in valid:
+            continue
+        ts = str(r.get("ts", "") or "")
+        ok_ts = _sane_ts(ts)
+        out.append({
+            "id": str(r.get("i", ""))[:36],
+            "logged_at": ts[:16] if ok_ts else datetime.now().isoformat(timespec="minutes"),
+            "date": ts[:10] if ok_ts else str(date.today()),
+            "barangay": b, "type": t, "detail": d, "note": _clean_note(r.get("n", "")),
+        })
+    return out
+
+
+def maybe_ingest(L):
+    """Module-level hook: the offline pack lands on any page with ?fq=<batch>, so ingestion
+    cannot wait for this page to be open. Writes the batch, confirms back to the pack
+    (?synced=ids, which clears them on the phone), and stops the run there - a sync visit
+    is a quick round trip, not a browsing session."""
+    fq = st.query_params.get("fq", "")
+    if "fq" in st.query_params:
+        del st.query_params["fq"]
+    if not fq:
+        return
+    if fq in st.session_state.setdefault("cs_fq_seen", []):
+        return          # same batch reloaded - already ingested, do not double-log
+    st.session_state["cs_fq_seen"].append(fq)
+    rows = ingest_queue(L, fq)
+    if not rows:
+        st.error("That offline sync did not contain usable reports. Nothing was written.")
+        st.stop()
+    new = pd.DataFrame(rows)[["logged_at", "date", "barangay", "type", "detail", "note"]]
+    if CR.exists():
+        pd.concat([new, pd.read_csv(CR)]).to_csv(CR, index=False)
+    else:
+        new.to_csv(CR, index=False)
+    ids = ",".join(r["id"] for r in rows if r["id"])
+    back = FIELD_PWA_URL + "?synced=" + ids
+    st.success(f"Synced {len(rows)} report(s) from the offline queue. Heading back to the field app...")
+    components.html(f"""
+        <script>setTimeout(function() {{ window.location.href = {json.dumps(back)}; }}, 900);</script>
+        <a href="{back}">If the field app does not reopen by itself, tap here.</a>""", height=52)
+    st.stop()
+
+
 def _gps_suggestion(L):
     """Read flat/flon from the URL (set by the GPS button), snap to a barangay, clean up."""
     lat_s, lon_s = st.query_params.get("flat", ""), st.query_params.get("flon", "")
@@ -139,6 +230,22 @@ def render(L):
     if CR.exists():
         st.caption("Latest reports (newest first, all anonymous)")
         st.dataframe(pd.read_csv(CR).head(6), hide_index=True, use_container_width=True)
+
+    with st.expander("Offline field pack (install once on each tanod phone)"):
+        st.markdown(f"`{FIELD_PWA_URL}` opens the pack. After one online visit, the phone keeps it "
+                    "and queues reports with no signal; the queued batch syncs to this app "
+                    "automatically the moment the phone finds data again.")
+        try:
+            import io
+            import qrcode as _qr
+            buf = io.BytesIO()
+            _qr.make(FIELD_PWA_URL).save(buf, format="PNG")
+            st.image(buf.getvalue(), width=190)
+        except Exception as e:
+            st.caption(f"QR unavailable here ({type(e).__name__}). Type the address instead.")
+        st.caption("Anonymous by design, like everything here - the pack stores reports on the "
+                   "phone itself until they sync, then keeps nothing.")
+
     st.caption("No name, no login, no stored coordinates - a report keeps your barangay only. "
                "On the flood map, the latest flood-depth report per barangay shows as a pin, "
                "colour-coded from gutter-deep (yellow-green) to chest-deep (dark red).")

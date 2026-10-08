@@ -818,6 +818,8 @@ if st.query_params.get("kiosk", "") in ("0", "false", "off"):
         pass
     st.rerun()
 
+field.maybe_ingest(L)   # offline pack sync (?fq= batch) must work from any landing page
+
 if PREFS.get("kiosk"):
     render_wall()
     st.stop()

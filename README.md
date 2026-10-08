@@ -70,7 +70,7 @@ A Streamlit command center built on the analysis artifacts: clean light theme, s
 | 📡 Live Telemetry | Live heat gauge + rain timeline, hourly heat-index curve with PAGASA bands, PhilSensors official-station status (instant from cache, explicit refresh), Pantal river manual log, crowd reports |
 | 🗺️ Barangay Walkthrough | 6-step guided flow per barangay: profile, terrain (ground profile, person-vs-water gauge, plain reading), flood exposure, countermeasures, evacuation route, action card + PNG/PDF briefing |
 | 🚑 Response & Dispatch | Simulator/training tool: timed team exercises on the storm clock, help texts to requests to unit travel and capacity to shelter fill-up, score and debrief PNG. Shelter/resources boards, nearest services, official directory (reference only) |
-| 📱 Field Report | Three-tap flood report for tanods and banca crews on their phones: barangay (optional one-tap GPS prefill), what you see, how deep. Anonymous by design, no stored coordinates, writes the same crowd reports the maps pin |
+| 📱 Field Report | Three-tap flood report for tanods and banca crews on their phones: barangay (optional one-tap GPS prefill), what you see, how deep. Anonymous by design, no stored coordinates, writes the same crowd reports the maps pin. Installable offline pack (GitHub Pages PWA) queues reports with no signal and syncs in one tap |
 | ℹ️ Methods & Sources | Provenance, calibration and honesty notes, model validation vs CDRRMO SitRep No. 15, elevation upgrade importer |
 
 Wall display (kiosk) mode: a single-screen auto-rotating scenario feed for an ops-room TV (F11 for fullscreen; exit link bottom-right).
