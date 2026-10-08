@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import time
+import urllib.error
 import urllib.request
 
 import data_core as dc
@@ -215,6 +216,13 @@ def _loop(L, token, timeout=25):
         except KeyboardInterrupt:
             print("Field bot stopped. Salamat!")
             return
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 404):      # Telegram rejecting the token: retrying cannot fix this
+                print("Telegram rejected this token (HTTP " + str(e.code) + "). Check the token in "
+                      "data/app_layers/bot_token.txt (one line, no spaces or quotes) and run this again.")
+                return
+            print(f"Telegram hiccup ({type(e).__name__} {e.code}) - retrying in 5s")
+            time.sleep(5)
         except Exception as e:
             print(f"Telegram hiccup ({type(e).__name__}) - retrying in 5s")
             time.sleep(5)
