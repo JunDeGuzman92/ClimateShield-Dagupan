@@ -43,11 +43,14 @@ def main():
         run("git", "add", "-A", cwd=str(tmp))
         run("git", "-c", "user.name=pages publish", "-c", "user.email=noreply@github.com",
             "commit", "-m", f"Publish field pack from main {sha}", cwd=str(tmp))
-        run("git", "push", "origin", BRANCH, cwd=str(tmp))
+        # the worktree HEAD is detached, so push that commit explicitly - a plain
+        # `push origin gh-pages` would push the (stale) local branch instead
+        run("git", "push", "origin", "HEAD:refs/heads/gh-pages", "-f", cwd=str(tmp))
         print(f"published field/ to {BRANCH} (from main {sha})")
     finally:
         subprocess.run(["git", "worktree", "remove", "--force", str(tmp)],
                        capture_output=True)
+        subprocess.run(["git", "worktree", "prune"], capture_output=True)
 
 
 if __name__ == "__main__":
