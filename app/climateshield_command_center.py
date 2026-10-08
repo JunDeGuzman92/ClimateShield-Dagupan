@@ -29,6 +29,7 @@ import gauges
 import demimport
 import exercise
 import feedback
+import field
 import heat
 import replay
 import validation
@@ -104,7 +105,8 @@ def save_prefs(p):
 PREFS = load_prefs()
 _apply_theme_tokens()
 NAV = ["🏠 Command Deck", "🌊 Flood Scenario Simulator", "☀️ Heat Scenario Simulator", "🛡️ Countermeasure Lab",
-       "📡 Live Telemetry", "🗺️ Barangay Walkthrough", "🚑 Response & Dispatch", "ℹ️ Methods & Sources"]
+       "📡 Live Telemetry", "🗺️ Barangay Walkthrough", "🚑 Response & Dispatch", "ℹ️ Methods & Sources",
+       "📱 Field Report"]
 
 
 def apply_theme_and_kiosk():
@@ -4136,4 +4138,7 @@ if page == NAV[6]:
 
 if page == NAV[7]:
     _fragment_methods()
+
+if page == NAV[8]:
+    field.render(L)
 

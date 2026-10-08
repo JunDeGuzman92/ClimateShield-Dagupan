@@ -7,6 +7,8 @@ __pycache__/
 # editorial / scratch
 notebooks/
 outputs/reports/
+# local recordings (walkthrough videos etc.) - never commit large binaries
+*.mp4
 
 # operational data with personal information (Data Privacy Act) - never commit
 data/app_layers/sms_contacts.csv

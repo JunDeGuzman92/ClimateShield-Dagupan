@@ -13,7 +13,7 @@ The command center runs in any modern phone browser. No app-store install, no ne
 
 ## What works well on phones
 
-- Crowd reports (flood depth, road state, banca requests). This is the feature built for tanods and banca crews.
+- Field Report (crowd reports). The dedicated page for tanods and banca crews: three taps (barangay, what you see, how deep), optional one-tap GPS that fills the barangay only, and no login. It writes the same crowd reports the maps pin.
 - Barangay walkthrough + action card: the copy button feeds straight into SMS / Viber / Facebook.
 - PDF briefings, downloaded from the phone and shared onward.
 

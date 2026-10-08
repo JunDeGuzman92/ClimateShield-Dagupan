@@ -59,7 +59,7 @@ run_app.bat            # or: python -m streamlit run app/climateshield_command_c
 
 ## The Command Center app (v1.0)
 
-A Streamlit command center built on the analysis artifacts: clean light theme, satellite maps, no 3D. Eight pages:
+A Streamlit command center built on the analysis artifacts: clean light theme, satellite maps, no 3D. Nine pages:
 
 | Page | What it does |
 |---|---|
@@ -70,6 +70,7 @@ A Streamlit command center built on the analysis artifacts: clean light theme, s
 | 📡 Live Telemetry | Live heat gauge + rain timeline, hourly heat-index curve with PAGASA bands, PhilSensors official-station status (instant from cache, explicit refresh), Pantal river manual log, crowd reports |
 | 🗺️ Barangay Walkthrough | 6-step guided flow per barangay: profile, terrain (ground profile, person-vs-water gauge, plain reading), flood exposure, countermeasures, evacuation route, action card + PNG/PDF briefing |
 | 🚑 Response & Dispatch | Simulator/training tool: timed team exercises on the storm clock, help texts to requests to unit travel and capacity to shelter fill-up, score and debrief PNG. Shelter/resources boards, nearest services, official directory (reference only) |
+| 📱 Field Report | Three-tap flood report for tanods and banca crews on their phones: barangay (optional one-tap GPS prefill), what you see, how deep. Anonymous by design, no stored coordinates, writes the same crowd reports the maps pin |
 | ℹ️ Methods & Sources | Provenance, calibration and honesty notes, model validation vs CDRRMO SitRep No. 15, elevation upgrade importer |
 
 Wall display (kiosk) mode: a single-screen auto-rotating scenario feed for an ops-room TV (F11 for fullscreen; exit link bottom-right).
@@ -91,7 +92,7 @@ The repo carries a sandboxed pytest suite (about 10 minutes; runtime data is bac
 run_tests.bat        # or: python -m pytest
 ```
 
-It covers: all 8 pages render, wall mode, heat simulator and relief layers, the flood ladder's monotonicity, replay calibration anchors (Aug 2026 habagat ~45% land flooded; Pepeng 2009 ~65%), mission travel and capacity physics, shelter fill-up, escalation, debrief rendering, a real-browser check that the time-lapse plays and the HUD doesn't cover the map, and an import-safety test that fails if network code ever appears in the messaging module.
+It covers: all 9 pages render, wall mode, heat simulator and relief layers, field reports to map pins, the flood ladder's monotonicity, replay calibration anchors (Aug 2026 habagat ~45% land flooded; Pepeng 2009 ~65%), mission travel and capacity physics, shelter fill-up, escalation, debrief rendering, a real-browser check that the time-lapse plays and the HUD doesn't cover the map, and an import-safety test that fails if network code ever appears in the messaging module.
 
 ## How the notebook is maintained
 
