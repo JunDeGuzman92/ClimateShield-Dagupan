@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>ClimateShield Field Report</title>
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<script src="anchors.js"></script>
+<style>
+  :root { --blue:#2563eb; --ink:#1f2937; --muted:#6b7280; --card:#ffffff; --bg:#f5f0e6;
+          --ok:#16a34a; --warn:#b45309; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0 auto; max-width:520px; padding:14px 14px 40px; font:16px/1.45 system-ui,
+         'Segoe UI', sans-serif; color:var(--ink); background:var(--bg); }
+  h1 { font-size:1.15rem; margin:4px 0 2px; }
+  .sub { color:var(--muted); font-size:.85rem; margin-bottom:10px; }
+  .warn { background:#fff7ed; border-left:4px solid var(--warn); border-radius:10px;
+          padding:10px 12px; font-size:.9rem; margin-bottom:12px; }
+  .banner { border-radius:10px; padding:10px 12px; font-size:.92rem; margin-bottom:10px; display:none; }
+  .banner.ok { display:block; background:#f0fdf4; border-left:4px solid var(--ok); }
+  label { display:block; font-size:.78rem; font-weight:700; letter-spacing:.06em;
+          text-transform:uppercase; color:var(--muted); margin:14px 0 6px; }
+  select, input[type=text] { width:100%; padding:14px 10px; font-size:17px; border:1px solid #e5e7eb;
+          border-radius:10px; background:var(--card); color:var(--ink); }
+  .kinds { display:flex; gap:8px; }
+  .kinds button { flex:1; padding:14px 4px; font-size:15px; font-weight:700; border:1px solid #e5e7eb;
+          border-radius:10px; background:var(--card); color:var(--ink); cursor:pointer; }
+  .kinds button.on { background:var(--blue); border-color:var(--blue); color:#fff; }
+  .btn { width:100%; padding:15px 18px; margin-top:14px; font-size:17px; font-weight:800;
+         color:#fff; background:var(--blue); border:0; border-radius:12px; cursor:pointer; }
+  .btn.ghost { background:var(--card); color:var(--blue); border:2px solid var(--blue); }
+  .btn:disabled { opacity:.45; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px;
+         background:var(--ok); }
+  .dot.off { background:#9ca3af; }
+  .queue { background:var(--card); border:1px solid #e5e7eb; border-radius:12px; margin-top:16px;
+           padding:10px 12px; }
+  .queue h2 { font-size:.95rem; margin:2px 0 8px; }
+  .qrow { display:flex; align-items:center; gap:8px; padding:7px 0; border-top:1px solid #f3f4f6;
+          font-size:.9rem; }
+  .qrow span { flex:1; }
+  .qrow .x { border:0; background:none; color:var(--muted); font-size:18px; cursor:pointer;
+             padding:2px 8px; }
+  .foot { margin-top:18px; color:var(--muted); font-size:.76rem; }
+</style>
+</head>
+<body>
+<h1>ClimateShield · Field Report</h1>
+<div class="sub"><span class="dot" id="net"></span><span id="netTxt">online</span> · works with no signal, syncs later</div>
+<div id="banner" class="banner ok"></div>
+
+<div class="warn"><b>This is NOT a rescue channel.</b> If lives are at risk, call the CDRRMO
+or emergency lines directly. This pack only feeds the community flood map.</div>
+
+<label>Barangay</label>
+<select id="brgy"></select>
+<button class="btn ghost" id="gps">📍 Use my location (fills the barangay only)</button>
+
+<label>What do you see?</label>
+<div class="kinds" id="kinds"></div>
+
+<label id="depthLbl">How deep</label>
+<select id="depth"></select>
+
+<label>Optional note (sitio, street landmark, banca count)</label>
+<input type="text" id="note" maxlength="120">
+
+<button class="btn" id="save">Save report</button>
+<button class="btn ghost" id="sync">Sync queued reports</button>
+
+<div class="queue" id="queueBox" hidden>
+  <h2>Saved on this phone (<span id="qCount">0</span>)</h2>
+  <div id="qlist"></div>
+  <button class="btn ghost" id="clear" style="margin-top:6px">Clear the queue</button>
+</div>
+
+<div class="foot">No name, no login, no stored coordinates. Reports wait in this phone until
+they sync, then nothing is kept here. Barangay anchors © OpenStreetMap contributors (ODbL).<br>
+Install: browser menu → <b>Add to Home screen</b> (once, while online). After that it opens
+and works even with no data.</div>
+
+<script>
+var APP = "https://climateshield-dagupan-jundeguzman.streamlit.app/";
+var DEPTH = ["gutter-deep", "ankle-deep", "knee-deep (light vehicles risky)",
+             "waist-deep (impassable)", "chest-deep+ (life-safety)"];
+var ROAD  = ["passable", "light vehicles only", "fully impassable"];
+var KINDS = [["Flood depth", "flood depth"], ["Road state", "road state"],
+             ["Banca needed", "banca/rescue request"]];
+var MAX_SYNC = 12;
+
+var $ = function (id) { return document.getElementById(id); };
+var state = { kind: KINDS[0], queue: [] };
+
+function load() { try { state.queue = JSON.parse(localStorage.getItem("cs_q") || "[]"); } catch (e) { state.queue = []; } }
+function save() { localStorage.setItem("cs_q", JSON.stringify(state.queue)); renderQueue(); }
+
+function b64u(s) {
+  return btoa(unescape(encodeURIComponent(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function id36() {
+  return (crypto.randomUUID ? crypto.randomUUID() :
+          Date.now().toString(36) + Math.random().toString(36).slice(2)).slice(0, 36);
+}
+function near(lat, lon) {
+  var best = null, bd = 6e9, R = 6371000;
+  (window.CS_FIELD || []).forEach(function (a) {
+    if (a.lat == null) return;
+    var dLa = (a.lat - lat) * Math.PI / 180, dLo = (a.lon - lon) * Math.PI / 180;
+    var m = 2 * R * Math.asin(Math.sqrt(
+        Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) *
+        Math.cos(lat * Math.PI / 180) * Math.sin(dLo / 2) ** 2));
+    if (m < bd) { bd = m; best = a.b; }
+  });
+  return bd / 1000 <= 6 ? best : null;
+}
+
+function build() {
+  var names = (window.CS_FIELD || []).map(function (a) { return a.b; }).sort();
+  $("brgy").innerHTML = names.map(function (n) { return '<option>' + n + '</option>'; }).join("");
+  $("kinds").innerHTML = KINDS.map(function (k, i) {
+    return '<button data-i="' + i + '"' + (i === 0 ? ' class="on"' : '') + '>' + k[0] + '</button>';
+  }).join("");
+  $("kinds").addEventListener("click", function (e) {
+    var b = e.target.closest("button"); if (!b) return;
+    state.kind = KINDS[+b.dataset.i];
+    [].forEach.call($("kinds").children, function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+    var list = state.kind[1] === "road state" ? ROAD : DEPTH;
+    $("depth").innerHTML = list.map(function (d) { return '<option>' + d + '</option>'; }).join("");
+    $("depthLbl").textContent = state.kind[1] === "road state" ? "What state" : "How deep";
+  });
+  $("depth").innerHTML = DEPTH.map(function (d) { return '<option>' + d + '</option>'; }).join("");
+}
+
+function renderQueue() {
+  $("qCount").textContent = state.queue.length;
+  $("queueBox").hidden = state.queue.length === 0;
+  $("sync").disabled = state.queue.length === 0;
+  $("qlist").innerHTML = state.queue.map(function (r, i) {
+    return '<div class="qrow"><span>' + r.b + ' · ' + r.d + '<br><small style="color:var(--muted)">' +
+           r.ts.replace("T", " ") + '</small></span><button class="x" data-i="' + i + '">✕</button></div>';
+  }).join("");
+}
+
+$("gps").addEventListener("click", function () {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(function (p) {
+    var b = near(p.coords.latitude, p.coords.longitude);
+    var banner = $("banner");
+    if (b) { $("brgy").value = b; banner.textContent = "📍 Barangay set to " + b + "."; }
+    else { banner.textContent = "You seem to be outside Dagupan - pick the barangay yourself."; }
+    banner.classList.add("ok");
+  }, function () {}, { timeout: 8000 });
+});
+
+$("save").addEventListener("click", function () {
+  state.queue.push({ i: id36(), b: $("brgy").value, t: state.kind[1],
+                     d: $("depth").value, n: $("note").value.trim(),
+                     ts: new Date().toISOString().slice(0, 16) });
+  $("note").value = "";
+  save();
+  var banner = $("banner");
+  banner.textContent = "Saved on this phone. It syncs to the map when data returns. Salamat, kapitid!";
+  banner.classList.add("ok");
+});
+
+$("sync").addEventListener("click", function () {
+  if (!state.queue.length) return;
+  var batch = state.queue.slice(-MAX_SYNC);
+  location.href = APP + "?fq=" + b64u(JSON.stringify(batch));
+});
+
+$("clear").addEventListener("click", function () { state.queue = []; save(); });
+$("qlist").addEventListener("click", function (e) {
+  var b = e.target.closest(".x"); if (!b) return;
+  state.queue.splice(+b.dataset.i, 1); save();
+});
+
+function net() { $("net").classList.toggle("off", !navigator.onLine);
+                 $("netTxt").textContent = navigator.onLine ? "online" : "offline"; }
+addEventListener("online", net); addEventListener("offline", net);
+
+// sync confirmation from the app (?synced=id,id): drop only the confirmed ids
+var m = location.search.match(/[?&]synced=([^&]+)/);
+if (m) {
+  var done = decodeURIComponent(m[1]).split(",");
+  var n = 0;
+  state.queue = state.queue.filter(function (r) {
+    if (r.i && done.indexOf(r.i) >= 0) { n++; return false; } return true;
+  });
+  save();
+  var banner = $("banner");
+  banner.textContent = "✅ " + n + " report" + (n === 1 ? "" : "s") + " synced to the map. ";
+  banner.textContent += state.queue.length ? (state.queue.length + " still waiting in the queue.") : "Queue empty - salamat!";
+  banner.classList.add("ok");
+  history.replaceState(null, "", location.pathname);
+}
+
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js");
+}
+build(); load(); renderQueue(); net();
+</script>
+</body>
+</html>
