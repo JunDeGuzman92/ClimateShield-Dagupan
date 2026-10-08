@@ -1419,7 +1419,7 @@ def _fragment_sim():
                                  f"({int(r['affected_est']):,} of {int(r['census']):,}) · basis: {r['basis']}")
             try:
                 from streamlit_folium import st_folium
-                fm = kit.make_city_map(L, depth=depth, W_cut=W, zoom=13, choro=choro)
+                fm = kit.make_city_map(L, depth=depth, W_cut=W, zoom=13, choro=choro, crowd=True)
                 st_folium(fm, height=640, use_container_width=True, returned_objects=[])
                 st.caption("Drag to pan · scroll to zoom · shaded barangays = share of residents estimated in "
                            f"flood zones ({L.boundary_source.split('(')[0].strip()}) · hover roads (% cut), "
