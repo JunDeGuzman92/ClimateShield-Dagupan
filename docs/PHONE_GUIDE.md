@@ -15,6 +15,7 @@ The command center runs in any modern phone browser. No app-store install, no ne
 
 - Field Report (crowd reports). The dedicated page for tanods and banca crews: three taps (barangay, what you see, how deep), optional one-tap GPS that fills the barangay only, and no login. It writes the same crowd reports the maps pin.
 - Offline field pack. Open `https://jundeguzman92.github.io/ClimateShield-Dagupan/` once while online and add it to the home screen; after that it opens and takes reports with no signal at all, queuing them on the phone until data returns. One tap syncs the batch into the map.
+- Telegram bot, optional. Crew members with nothing but Telegram can send reports through a chat (`run_bot.bat` on the ops laptop, one-time @BotFather token; details in `app/field_bot.py`). Buttons only, so every word the map reads stays exact.
 - Barangay walkthrough + action card: the copy button feeds straight into SMS / Viber / Facebook.
 - PDF briefings, downloaded from the phone and shared onward.
 

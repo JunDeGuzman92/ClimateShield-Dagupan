@@ -70,7 +70,7 @@ A Streamlit command center built on the analysis artifacts: clean light theme, s
 | 📡 Live Telemetry | Live heat gauge + rain timeline, hourly heat-index curve with PAGASA bands, PhilSensors official-station status (instant from cache, explicit refresh), Pantal river manual log, crowd reports |
 | 🗺️ Barangay Walkthrough | 6-step guided flow per barangay: profile, terrain (ground profile, person-vs-water gauge, plain reading), flood exposure, countermeasures, evacuation route, action card + PNG/PDF briefing |
 | 🚑 Response & Dispatch | Simulator/training tool: timed team exercises on the storm clock, help texts to requests to unit travel and capacity to shelter fill-up, score and debrief PNG. Shelter/resources boards, nearest services, official directory (reference only) |
-| 📱 Field Report | Three-tap flood report for tanods and banca crews on their phones: barangay (optional one-tap GPS prefill), what you see, how deep. Anonymous by design, no stored coordinates, writes the same crowd reports the maps pin. Installable offline pack (GitHub Pages PWA) queues reports with no signal and syncs in one tap |
+| 📱 Field Report | Three-tap flood report for tanods and banca crews on their phones: barangay (optional one-tap GPS prefill), what you see, how deep. Anonymous by design, no stored coordinates, writes the same crowd reports the maps pin. Installable offline pack (GitHub Pages PWA) queues reports with no signal and syncs in one tap; optional Telegram bot (`run_bot.bat`) takes reports with no app at all |
 | ℹ️ Methods & Sources | Provenance, calibration and honesty notes, model validation vs CDRRMO SitRep No. 15, elevation upgrade importer |
 
 Wall display (kiosk) mode: a single-screen auto-rotating scenario feed for an ops-room TV (F11 for fullscreen; exit link bottom-right).
@@ -92,7 +92,7 @@ The repo carries a sandboxed pytest suite (about 10 minutes; runtime data is bac
 run_tests.bat        # or: python -m pytest
 ```
 
-It covers: all 9 pages render, wall mode, heat simulator and relief layers, field reports to map pins, the flood ladder's monotonicity, replay calibration anchors (Aug 2026 habagat ~45% land flooded; Pepeng 2009 ~65%), mission travel and capacity physics, shelter fill-up, escalation, debrief rendering, a real-browser check that the time-lapse plays and the HUD doesn't cover the map, and an import-safety test that fails if network code ever appears in the messaging module.
+It covers: all 9 pages render, wall mode, heat simulator and relief layers, field reports to map pins, offline pack batches and vocabulary consistency, the Telegram field-bot conversation (aliases, buttons-only depth, rescue boundary), the flood ladder's monotonicity, replay calibration anchors (Aug 2026 habagat ~45% land flooded; Pepeng 2009 ~65%), mission travel and capacity physics, shelter fill-up, escalation, debrief rendering, a real-browser check that the time-lapse plays and the HUD doesn't cover the map, and an import-safety test that fails if network code ever appears in the messaging module.
 
 ## How the notebook is maintained
 
